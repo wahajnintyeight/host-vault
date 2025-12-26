@@ -1,0 +1,244 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+)
+
+// App struct
+type App struct {
+	ctx context.Context
+}
+
+// NewApp creates a new App application struct
+func NewApp() *App {
+	return &App{}
+}
+
+// startup is called when the app starts. The context is saved
+// so we can call the runtime methods
+func (a *App) startup(ctx context.Context) {
+	a.ctx = ctx
+}
+
+// Greet returns a greeting for the given name
+func (a *App) Greet(name string) string {
+	return fmt.Sprintf("Hello %s, It's show time!", name)
+}
+
+// SaveToKeychain saves a value to Windows Credential Manager
+// This is a placeholder - actual implementation will use golang.org/x/sys/windows
+func (a *App) SaveToKeychain(key string, value string) error {
+	// TODO: Implement Windows Credential Manager integration
+	// For now, return an error indicating it's not implemented
+	return errors.New("Windows Credential Manager integration not yet implemented")
+}
+
+// GetFromKeychain retrieves a value from Windows Credential Manager
+func (a *App) GetFromKeychain(key string) (string, error) {
+	// TODO: Implement Windows Credential Manager integration
+	return "", errors.New("Windows Credential Manager integration not yet implemented")
+}
+
+// DeleteFromKeychain removes a value from Windows Credential Manager
+func (a *App) DeleteFromKeychain(key string) error {
+	// TODO: Implement Windows Credential Manager integration
+	return errors.New("Windows Credential Manager integration not yet implemented")
+}
+
+// GetAppDataPath returns the application data directory path
+// On Windows: %APPDATA%\host-vault
+func (a *App) GetAppDataPath() (string, error) {
+	appDataDir := os.Getenv("APPDATA")
+	if appDataDir == "" {
+		return "", errors.New("APPDATA environment variable not set")
+	}
+	
+	appPath := filepath.Join(appDataDir, "host-vault")
+	
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(appPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create app data directory: %w", err)
+	}
+	
+	return appPath, nil
+}
+
+// GetDatabasePath returns the path to the SQLite database file
+func (a *App) GetDatabasePath() (string, error) {
+	appPath, err := a.GetAppDataPath()
+	if err != nil {
+		return "", err
+	}
+	
+	dbPath := filepath.Join(appPath, "db", "main.db")
+	
+	// Create db directory if it doesn't exist
+	dbDir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create db directory: %w", err)
+	}
+	
+	return dbPath, nil
+}
+
+// GetBackupPath returns the path to the backups directory
+func (a *App) GetBackupPath() (string, error) {
+	appPath, err := a.GetAppDataPath()
+	if err != nil {
+		return "", err
+	}
+	
+	backupPath := filepath.Join(appPath, "backups")
+	
+	// Create backups directory if it doesn't exist
+	if err := os.MkdirAll(backupPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create backups directory: %w", err)
+	}
+	
+	return backupPath, nil
+}
+
+// GetGuestConfigPath returns the path to the guest config file
+// Path: %APPDATA%\host-vault\guest\config.json
+func (a *App) GetGuestConfigPath() (string, error) {
+	appPath, err := a.GetAppDataPath()
+	if err != nil {
+		return "", err
+	}
+	
+	guestPath := filepath.Join(appPath, "guest")
+	
+	// Create guest directory if it doesn't exist
+	if err := os.MkdirAll(guestPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create guest directory: %w", err)
+	}
+	
+	configPath := filepath.Join(guestPath, "config.json")
+	return configPath, nil
+}
+
+// GetUserConfigPath returns the path to a user's config file
+// Path: %APPDATA%\host-vault\users\{userId}\config.json
+func (a *App) GetUserConfigPath(userId string) (string, error) {
+	appPath, err := a.GetAppDataPath()
+	if err != nil {
+		return "", err
+	}
+	
+	userPath := filepath.Join(appPath, "users", userId)
+	
+	// Create user directory if it doesn't exist
+	if err := os.MkdirAll(userPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create user directory: %w", err)
+	}
+	
+	configPath := filepath.Join(userPath, "config.json")
+	return configPath, nil
+}
+
+// ShowMessageDialog shows a native Windows message dialog
+// This is a placeholder - actual implementation will use Windows API
+func (a *App) ShowMessageDialog(title string, message string, dialogType string) (string, error) {
+	// TODO: Implement Windows native dialog using Windows API
+	// For now, return an error indicating it's not implemented
+	// dialogType can be: "info", "warning", "error", "question"
+	return "", errors.New("Native message dialog not yet implemented")
+}
+
+// ShowOpenFileDialog shows a native Windows file open dialog
+func (a *App) ShowOpenFileDialog(title string, filters string) (string, error) {
+	// TODO: Implement Windows file dialog using Windows API
+	// filters format: "JSON Files (*.json)|*.json|All Files (*.*)|*.*"
+	return "", errors.New("Native file dialog not yet implemented")
+}
+
+// ShowSaveFileDialog shows a native Windows file save dialog
+func (a *App) ShowSaveFileDialog(title string, defaultFilename string, filters string) (string, error) {
+	// TODO: Implement Windows file dialog using Windows API
+	return "", errors.New("Native file dialog not yet implemented")
+}
+
+// FileExists checks if a file exists
+func (a *App) FileExists(filePath string) bool {
+	_, err := os.Stat(filePath)
+	return !os.IsNotExist(err)
+}
+
+// ReadFile reads the contents of a file
+func (a *App) ReadFile(filePath string) (string, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+	return string(data), nil
+}
+
+// WriteFile writes data to a file
+func (a *App) WriteFile(filePath string, data string) error {
+	// Create directory if it doesn't exist
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+	
+	if err := os.WriteFile(filePath, []byte(data), 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+	
+	return nil
+}
+
+// DeleteFile deletes a file
+func (a *App) DeleteFile(filePath string) error {
+	if err := os.Remove(filePath); err != nil {
+		return fmt.Errorf("failed to delete file: %w", err)
+	}
+	return nil
+}
+
+// ListFiles lists files in a directory
+func (a *App) ListFiles(dirPath string) ([]string, error) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory: %w", err)
+	}
+	
+	var files []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			files = append(files, entry.Name())
+		}
+	}
+	
+	return files, nil
+}
+
+// WindowMinimize minimizes the window
+func (a *App) WindowMinimize() {
+	runtime.WindowMinimise(a.ctx)
+}
+
+// WindowMaximize maximizes or restores the window
+func (a *App) WindowMaximize() {
+	if runtime.WindowIsMaximised(a.ctx) {
+		runtime.WindowUnmaximise(a.ctx)
+	} else {
+		runtime.WindowMaximise(a.ctx)
+	}
+}
+
+// WindowClose closes the window
+func (a *App) WindowClose() {
+	runtime.Quit(a.ctx)
+}
+
+// WindowIsMaximised checks if window is maximized
+func (a *App) WindowIsMaximised() bool {
+	return runtime.WindowIsMaximised(a.ctx)
+}
