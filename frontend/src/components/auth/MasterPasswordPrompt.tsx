@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { verifyMasterPassword } from '../../lib/encryption/password';
+import { verifyMasterPassword, deriveKeyFromPassword } from '../../lib/encryption/password';
 import { useAuthStore } from '../../store/authStore';
 import { useAppStore } from '../../store/appStore';
 import { useNavigate } from 'react-router-dom';
@@ -40,6 +40,11 @@ export const MasterPasswordPrompt: React.FC<MasterPasswordPromptProps> = ({
 
       const isValid = await verifyMasterPassword(password, storedHash);
       if (isValid) {
+        // Derive and store the encryption key
+        const [salt] = storedHash.split(':');
+        const { key } = await deriveKeyFromPassword(password, salt);
+        localStorage.setItem('vault_encryption_key', key);
+
         setMasterPasswordUnlocked(true);
         addToast({
           type: 'success',

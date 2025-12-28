@@ -40,6 +40,8 @@ export function ListFiles(arg1:string):Promise<Array<string>>;
 
 export function ReadFile(arg1:string):Promise<string>;
 
+export function ReconnectTerminal(arg1:string,arg2:string,arg3:number,arg4:string,arg5:string,arg6:string):Promise<void>;
+
 export function ResizeTerminal(arg1:string,arg2:number,arg3:number):Promise<void>;
 
 export function SaveToKeychain(arg1:string,arg2:string):Promise<void>;

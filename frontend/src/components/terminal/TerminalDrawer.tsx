@@ -124,7 +124,7 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="h-full w-72 bg-background-light border-l border-border flex flex-col">
+    <div className="absolute top-0 right-0 h-full w-72 bg-background-light border-l border-border flex flex-col z-30">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
         <div className="flex gap-1">
           <button

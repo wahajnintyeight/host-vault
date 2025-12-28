@@ -19,6 +19,7 @@ type LocalPTYSession struct {
 	mu       sync.RWMutex
 	closed   bool
 	buffer   chan []byte
+	done     chan struct{}
 }
 
 func NewLocalPTYSession(shell, cwd string, env map[string]string) (*LocalPTYSession, error) {
@@ -52,9 +53,11 @@ func NewLocalPTYSession(shell, cwd string, env map[string]string) (*LocalPTYSess
 			Shell:            shell,
 			Environment:      env,
 			CreatedAt:        time.Now(),
+			State:            SessionStateActive,
 		},
-		buffer: make(chan []byte, 100),
+		buffer: make(chan []byte, 1000), // Increased buffer size
 		closed: false,
+		done:   make(chan struct{}),
 	}
 
 	go session.readOutput()
@@ -65,21 +68,38 @@ func NewLocalPTYSession(shell, cwd string, env map[string]string) (*LocalPTYSess
 func (s *LocalPTYSession) readOutput() {
 	buf := make([]byte, 4096)
 	for {
-		n, err := s.cpty.Read(buf)
-		if err != nil {
-			if err != io.EOF {
-				// Log error if needed
-			}
-			close(s.buffer)
+		select {
+		case <-s.done:
 			return
-		}
-		if n > 0 {
-			data := make([]byte, n)
-			copy(data, buf[:n])
-			select {
-			case s.buffer <- data:
-			default:
-				// Buffer full, drop data
+		default:
+			n, err := s.cpty.Read(buf)
+			if err != nil {
+				if err != io.EOF {
+					// Log error but don't close immediately - might be recoverable
+					select {
+					case <-time.After(100 * time.Millisecond):
+						// Brief pause before retry
+					case <-s.done:
+						return
+					}
+					continue
+				}
+				// Close buffer channel when EOF is reached
+				close(s.buffer)
+				return
+			}
+			if n > 0 {
+				data := make([]byte, n)
+				copy(data, buf[:n])
+
+				// Use timeout to prevent blocking indefinitely
+				select {
+				case s.buffer <- data:
+				case <-time.After(1 * time.Second):
+					// Buffer full, drop data to prevent blocking
+				case <-s.done:
+					return
+				}
 			}
 		}
 	}
@@ -125,6 +145,9 @@ func (s *LocalPTYSession) Close() error {
 	}
 
 	s.closed = true
+
+	// Signal readOutput goroutine to stop
+	close(s.done)
 
 	if s.cpty != nil {
 		s.cpty.Close()

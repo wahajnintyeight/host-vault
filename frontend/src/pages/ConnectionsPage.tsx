@@ -22,6 +22,8 @@ import { ROUTES } from '../lib/constants';
 import { useTerminalStore } from '../store/terminalStore';
 import { ConnectionModal, ConnectionFormData } from '../components/connections/ConnectionModal';
 import type { SSHConnection } from '../types';
+import { encryptPassword, encryptPrivateKey, decryptPassword, decryptPrivateKey } from '../lib/encryption/crypto';
+import { useAuthStore } from '../store/authStore';
 
 export const ConnectionsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -37,9 +39,19 @@ export const ConnectionsPage: React.FC = () => {
     setConnections,
   } = useConnectionStore();
   const { createSSHTerminal } = useTerminalStore();
+  const { isGuestMode } = useAuthStore();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<SSHConnection | null>(null);
+  const [connectingState, setConnectingState] = useState<{
+    connectionId: string | null;
+    error: string | null;
+    isRetrying: boolean;
+  }>({
+    connectionId: null,
+    error: null,
+    isRetrying: false,
+  });
 
   useEffect(() => {
     // Load connections from localStorage
@@ -68,18 +80,51 @@ export const ConnectionsPage: React.FC = () => {
     setEditingConnection(null);
   };
 
-  const handleSave = (formData: ConnectionFormData) => {
+  const handleSave = async (formData: ConnectionFormData) => {
     const now = new Date().toISOString();
-    
+
     if (editingConnection) {
+      let passwordEncrypted: string | undefined;
+      let privateKeyEncrypted: string | undefined;
+
+      // Only encrypt passwords if not in guest mode
+      if (!isGuestMode) {
+        const encryptionKey = localStorage.getItem('vault_encryption_key');
+        if (encryptionKey) {
+          try {
+            if (formData.authMethod === 'password' && formData.password) {
+              const encrypted = encryptPassword(formData.password, encryptionKey);
+              passwordEncrypted = JSON.stringify(encrypted);
+            }
+            if (formData.authMethod === 'key' && formData.privateKey) {
+              const encrypted = encryptPrivateKey(formData.privateKey, encryptionKey);
+              privateKeyEncrypted = JSON.stringify(encrypted);
+            }
+          } catch (error) {
+            console.error('Failed to encrypt connection credentials:', error);
+            // Fall back to storing as plain text or keeping existing values
+            passwordEncrypted = formData.password || editingConnection.passwordEncrypted;
+            privateKeyEncrypted = formData.privateKey || editingConnection.privateKeyEncrypted;
+          }
+        } else {
+          // No encryption key available, store as plain text
+          passwordEncrypted = formData.password || editingConnection.passwordEncrypted;
+          privateKeyEncrypted = formData.privateKey || editingConnection.privateKeyEncrypted;
+        }
+      } else {
+        // In guest mode, store as plain text
+        passwordEncrypted = formData.password || editingConnection.passwordEncrypted;
+        privateKeyEncrypted = formData.privateKey || editingConnection.privateKeyEncrypted;
+      }
+
       const updated: SSHConnection = {
         ...editingConnection,
         name: formData.name,
         host: formData.host,
         port: formData.port,
         username: formData.username,
-        privateKeyEncrypted: formData.authMethod === 'key' ? formData.privateKey : undefined,
-        passwordEncrypted: formData.authMethod === 'password' ? formData.password : undefined,
+        privateKeyEncrypted: formData.authMethod === 'key' ? privateKeyEncrypted : undefined,
+        passwordEncrypted: formData.authMethod === 'password' ? passwordEncrypted : undefined,
         tags: formData.tags,
         updatedAt: now,
       };
@@ -87,6 +132,39 @@ export const ConnectionsPage: React.FC = () => {
       const newConns = connections.map(c => c.id === editingConnection.id ? updated : c);
       saveToStorage(newConns);
     } else {
+      let passwordEncrypted: string | undefined;
+      let privateKeyEncrypted: string | undefined;
+
+      // Only encrypt passwords if not in guest mode
+      if (!isGuestMode) {
+        const encryptionKey = localStorage.getItem('vault_encryption_key');
+        if (encryptionKey) {
+          try {
+            if (formData.authMethod === 'password' && formData.password) {
+              const encrypted = encryptPassword(formData.password, encryptionKey);
+              passwordEncrypted = JSON.stringify(encrypted);
+            }
+            if (formData.authMethod === 'key' && formData.privateKey) {
+              const encrypted = encryptPrivateKey(formData.privateKey, encryptionKey);
+              privateKeyEncrypted = JSON.stringify(encrypted);
+            }
+          } catch (error) {
+            console.error('Failed to encrypt connection credentials:', error);
+            // Fall back to storing as plain text
+            passwordEncrypted = formData.password;
+            privateKeyEncrypted = formData.privateKey;
+          }
+        } else {
+          // No encryption key available, store as plain text
+          passwordEncrypted = formData.password;
+          privateKeyEncrypted = formData.privateKey;
+        }
+      } else {
+        // In guest mode, store as plain text
+        passwordEncrypted = formData.password;
+        privateKeyEncrypted = formData.privateKey;
+      }
+
       const newConnection: SSHConnection = {
         id: crypto.randomUUID(),
         userId: 'guest',
@@ -94,8 +172,8 @@ export const ConnectionsPage: React.FC = () => {
         host: formData.host,
         port: formData.port,
         username: formData.username,
-        privateKeyEncrypted: formData.authMethod === 'key' ? formData.privateKey : undefined,
-        passwordEncrypted: formData.authMethod === 'password' ? formData.password : undefined,
+        privateKeyEncrypted: formData.authMethod === 'key' ? privateKeyEncrypted : undefined,
+        passwordEncrypted: formData.authMethod === 'password' ? passwordEncrypted : undefined,
         tags: formData.tags,
         isFavorite: false,
         version: 1,
@@ -126,12 +204,69 @@ export const ConnectionsPage: React.FC = () => {
     navigator.clipboard.writeText(cmd);
   };
 
-  const handleConnect = async (conn: SSHConnection) => {
+  const handleConnect = async (conn: SSHConnection, isRetry = false) => {
+    setConnectingState({
+      connectionId: conn.id,
+      error: null,
+      isRetrying: isRetry,
+    });
+
     try {
-      await createSSHTerminal(conn.host, conn.port, conn.username, conn.passwordEncrypted || '', conn.privateKeyEncrypted);
+      let password = '';
+      let privateKey = '';
+
+      // Decrypt passwords if not in guest mode
+      if (!isGuestMode) {
+        const encryptionKey = localStorage.getItem('vault_encryption_key');
+        if (encryptionKey && conn.passwordEncrypted) {
+          try {
+            const passwordData = JSON.parse(conn.passwordEncrypted);
+            password = decryptPassword(passwordData, encryptionKey);
+          } catch (error) {
+            console.error('Failed to decrypt password for connection:', error);
+          }
+        }
+        if (encryptionKey && conn.privateKeyEncrypted) {
+          try {
+            const privateKeyData = JSON.parse(conn.privateKeyEncrypted);
+            privateKey = decryptPrivateKey(privateKeyData, encryptionKey);
+          } catch (error) {
+            console.error('Failed to decrypt private key for connection:', error);
+          }
+        }
+      } else {
+        // In guest mode, passwords are stored as plain text
+        password = conn.passwordEncrypted || '';
+        privateKey = conn.privateKeyEncrypted || '';
+      }
+
+      await createSSHTerminal(conn.host, conn.port, conn.username, password, privateKey, conn.name);
       navigate(ROUTES.TERMINAL);
     } catch (error) {
       console.error('Failed to connect:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      setConnectingState({
+        connectionId: conn.id,
+        error: errorMessage,
+        isRetrying: false,
+      });
+      // Don't auto-clear the error state - let user dismiss or retry
+    }
+  };
+
+  const handleDismissError = () => {
+    setConnectingState({
+      connectionId: null,
+      error: null,
+      isRetrying: false,
+    });
+  };
+
+  const handleRetryConnection = () => {
+    const connection = connections.find(c => c.id === connectingState.connectionId);
+    if (connection) {
+      handleConnect(connection, true);
     }
   };
 
@@ -182,8 +317,9 @@ export const ConnectionsPage: React.FC = () => {
     });
   };
 
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 relative">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -278,6 +414,108 @@ export const ConnectionsPage: React.FC = () => {
         </div>
       )}
 
+      {/* Connection Status Overlay */}
+      {connectingState.connectionId && (
+        <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-background-light border border-border rounded-xl p-8 max-w-md w-full text-center space-y-6 shadow-2xl animate-fade-in-scale">
+            <div className="relative transition-all duration-500 ease-out">
+              {connectingState.error ? (
+                // Error state - show warning icon with smooth transition
+                <div className="w-16 h-16 rounded-full bg-danger/10 flex items-center justify-center mx-auto animate-fade-in-scale">
+                  <Terminal className="w-8 h-8 text-danger" style={{ animation: 'fadeInUp 0.4s ease-out 0.2s both' }} />
+                </div>
+              ) : connectingState.isRetrying ? (
+                // Retrying state - show refresh icon with pulse
+                <div className="w-16 h-16 rounded-full bg-warning/10 flex items-center justify-center mx-auto animate-fade-in-scale">
+                  <Terminal className="w-8 h-8 text-warning animate-pulse" style={{ animation: 'fadeInUp 0.4s ease-out 0.2s both' }} />
+                </div>
+              ) : (
+                // Connecting state - show spinner with smooth transitions
+                <div className="relative animate-fade-in-scale">
+                  <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
+                    <Terminal className="w-8 h-8 text-primary" style={{ animation: 'fadeInUp 0.4s ease-out 0.2s both' }} />
+                  </div>
+                  <div className="absolute inset-0 flex items-center justify-center" style={{ animation: 'fadeInUp 0.5s ease-out 0.3s both' }}>
+                    <div className="w-20 h-20 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-4 transition-all duration-300">
+              {connectingState.error ? (
+                <div className="space-y-4 animate-fade-in-up">
+                  <div className="space-y-2">
+                    <h3 className="text-lg font-semibold text-danger">Connection Failed</h3>
+                    <p className="text-text-muted text-sm">Unable to establish SSH connection</p>
+                  </div>
+
+                  <div className="bg-danger/5 border border-danger/20 rounded-lg p-4 text-left">
+                    <div className="text-sm text-danger font-mono break-all max-h-32 overflow-y-auto">
+                      {connectingState.error}
+                    </div>
+                  </div>
+                </div>
+              ) : connectingState.isRetrying ? (
+                <div className="space-y-2 animate-fade-in-up">
+                  <h3 className="text-lg font-semibold text-warning">Retrying Connection</h3>
+                  <p className="text-text-muted text-sm">Attempting to reconnect to the server</p>
+                </div>
+              ) : (
+                <div className="space-y-2 animate-fade-in-up">
+                  <h3 className="text-lg font-semibold text-text-primary">Connecting...</h3>
+                  <p className="text-text-muted text-sm">Establishing SSH connection</p>
+                </div>
+              )}
+
+              <div className="text-xs text-text-secondary bg-background/50 rounded-lg px-3 py-2 font-mono transition-all duration-300">
+                {(() => {
+                  const conn = connections.find(c => c.id === connectingState.connectionId);
+                  return conn ? `${conn.username}@${conn.host}:${conn.port}` : 'Unknown connection';
+                })()}
+              </div>
+            </div>
+
+            <div className="transition-all duration-300 ease-out">
+              {connectingState.error ? (
+                <div className="flex gap-3 justify-center" style={{ animation: 'fadeInUp 0.5s ease-out 0.4s both' }}>
+                  <button
+                    onClick={handleDismissError}
+                    className="px-4 py-2 text-sm bg-background-lighter text-text-secondary hover:text-text-primary rounded-lg transition-all duration-200 hover:scale-105 active:scale-95"
+                  >
+                    Dismiss
+                  </button>
+                  <button
+                    onClick={handleRetryConnection}
+                    className="px-4 py-2 text-sm bg-primary text-background font-medium rounded-lg hover:bg-primary-dark transition-all duration-200 hover:scale-105 active:scale-95 shadow-lg shadow-primary/20"
+                  >
+                    Retry Connection
+                  </button>
+                </div>
+              ) : connectingState.isRetrying ? (
+                <div className="flex items-center justify-center gap-1" style={{ animation: 'fadeInUp 0.5s ease-out 0.4s both' }}>
+                  <span className="w-2 h-2 bg-warning rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-2 h-2 bg-warning rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-2 h-2 bg-warning rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+              ) : (
+                <div className="flex items-center justify-center gap-1" style={{ animation: 'fadeInUp 0.5s ease-out 0.4s both' }}>
+                  <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+              )}
+
+              {!connectingState.error && (
+                <p className="text-xs text-text-muted/70" style={{ animation: 'fadeInUp 0.4s ease-out 0.6s both' }}>
+                  {connectingState.isRetrying ? 'Trying again...' : ''}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Connection Modal */}
       <ConnectionModal
         isOpen={isModalOpen}
@@ -311,7 +549,8 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
 }) => {
   const [showCopied, setShowCopied] = useState(false);
 
-  const handleCopy = () => {
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
     onCopy();
     setShowCopied(true);
     setTimeout(() => setShowCopied(false), 2000);
@@ -323,12 +562,17 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
   };
 
   return (
-    <div className="group bg-background-light border border-border rounded-xl p-4 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all duration-200">
+    <div
+      className="group bg-background-light border border-border rounded-xl p-4 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 hover:scale-[1.02] transition-all duration-200 cursor-pointer"
+      onClick={onConnect}
+      title={`Click to connect to ${connection.name}`}
+    >
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="font-medium text-text-primary truncate">{connection.name}</h3>
             {connection.isFavorite && <Star className="w-4 h-4 text-warning fill-warning" />}
+            <Terminal className="w-3 h-3 text-primary opacity-0 group-hover:opacity-100 transition-opacity ml-1" />
           </div>
           <p className="text-xs text-text-muted mt-0.5 truncate">
             {connection.username}@{connection.host}
@@ -336,7 +580,10 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
         </div>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
-            onClick={onToggleFavorite}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFavorite();
+            }}
             className={`p-1.5 rounded-lg hover:bg-background-lighter transition-colors ${
               connection.isFavorite ? 'text-warning' : 'text-text-muted hover:text-warning'
             }`}
@@ -345,14 +592,20 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
             <Star className={`w-3.5 h-3.5 ${connection.isFavorite ? 'fill-current' : ''}`} />
           </button>
           <button
-            onClick={onEdit}
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit();
+            }}
             className="p-1.5 rounded-lg hover:bg-background-lighter text-text-muted hover:text-text-primary transition-colors"
             title="Edit"
           >
             <Edit2 className="w-3.5 h-3.5" />
           </button>
           <button
-            onClick={onDelete}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
             className="p-1.5 rounded-lg hover:bg-danger/10 text-text-muted hover:text-danger transition-colors"
             title="Delete"
           >
@@ -398,7 +651,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
           <Clock className="w-3 h-3" />
           {formatDate(connection.createdAt)}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center justify-between w-full">
           <button
             onClick={handleCopy}
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg bg-background-lighter text-text-secondary hover:text-text-primary hover:bg-background transition-colors"
@@ -407,14 +660,9 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
             {showCopied ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
             {showCopied ? 'Copied!' : 'Copy'}
           </button>
-          <button
-            onClick={onConnect}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-            title="Connect"
-          >
-            <Terminal className="w-3 h-3" />
-            Connect
-          </button>
+          <div className="text-xs text-text-muted opacity-0 group-hover:opacity-100 transition-opacity">
+            Click to connect
+          </div>
         </div>
       </div>
     </div>

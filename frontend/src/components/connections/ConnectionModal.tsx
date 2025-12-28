@@ -13,6 +13,8 @@ import {
   EyeOff,
 } from 'lucide-react';
 import type { SSHConnection } from '../../types';
+import { decryptPassword, decryptPrivateKey } from '../../lib/encryption/crypto';
+import { useAuthStore } from '../../store/authStore';
 
 export type AuthMethod = 'password' | 'key' | 'certificate';
 
@@ -80,31 +82,69 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   });
   const [showPassword, setShowPassword] = useState(false);
   const [tagInput, setTagInput] = useState('');
+  const [hasExistingPassword, setHasExistingPassword] = useState(false);
+  const [hasExistingPrivateKey, setHasExistingPrivateKey] = useState(false);
+  const { isGuestMode } = useAuthStore();
 
   // Reset form when modal opens/closes or editing connection changes
   React.useEffect(() => {
-    if (isOpen) {
-      if (editingConnection) {
-        setFormData({
-          name: editingConnection.name,
-          host: editingConnection.host,
-          port: editingConnection.port,
-          username: editingConnection.username,
-          authMethod: editingConnection.privateKeyEncrypted ? 'key' : 'password',
-          password: '',
-          privateKey: editingConnection.privateKeyEncrypted || '',
-          passphrase: '',
-          certificate: '',
-          tags: editingConnection.tags || [],
-          description: '',
-          group: '',
-        });
-      } else {
-        setFormData(initialFormData);
+    const initializeForm = async () => {
+      if (isOpen) {
+        if (editingConnection) {
+          let decryptedPassword = '';
+          let decryptedPrivateKey = editingConnection.privateKeyEncrypted || '';
+
+          // Decrypt passwords only if not in guest mode and encryption key is available
+          if (!isGuestMode) {
+            const encryptionKey = localStorage.getItem('vault_encryption_key');
+            if (encryptionKey) {
+              try {
+                if (editingConnection.passwordEncrypted) {
+                  const passwordData = JSON.parse(editingConnection.passwordEncrypted);
+                  decryptedPassword = decryptPassword(passwordData, encryptionKey);
+                }
+                if (editingConnection.privateKeyEncrypted) {
+                  const privateKeyData = JSON.parse(editingConnection.privateKeyEncrypted);
+                  decryptedPrivateKey = decryptPrivateKey(privateKeyData, encryptionKey);
+                }
+              } catch (error) {
+                console.error('Failed to decrypt connection credentials:', error);
+                // Keep encrypted values if decryption fails
+              }
+            }
+          } else {
+            // In guest mode, passwords are stored as plain text
+            decryptedPassword = editingConnection.passwordEncrypted || '';
+            decryptedPrivateKey = editingConnection.privateKeyEncrypted || '';
+          }
+
+          setFormData({
+            name: editingConnection.name,
+            host: editingConnection.host,
+            port: editingConnection.port,
+            username: editingConnection.username,
+            authMethod: editingConnection.privateKeyEncrypted ? 'key' : 'password',
+            password: decryptedPassword,
+            privateKey: decryptedPrivateKey,
+            passphrase: '',
+            certificate: '',
+            tags: editingConnection.tags || [],
+            description: '',
+            group: '',
+          });
+          setHasExistingPassword(!!editingConnection.passwordEncrypted);
+          setHasExistingPrivateKey(!!editingConnection.privateKeyEncrypted);
+        } else {
+          setFormData(initialFormData);
+          setHasExistingPassword(false);
+          setHasExistingPrivateKey(false);
+        }
+        setShowPassword(false);
+        setTagInput('');
       }
-      setShowPassword(false);
-      setTagInput('');
-    }
+    };
+
+    initializeForm();
   }, [isOpen, editingConnection]);
 
   const handleAddTag = () => {
@@ -309,7 +349,12 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
               {/* Password Input */}
               {formData.authMethod === 'password' && (
                 <div>
-                  <label className="block text-xs font-medium text-text-muted mb-1.5">Password</label>
+                  <label className="block text-xs font-medium text-text-muted mb-1.5">
+                    Password
+                    {editingConnection && hasExistingPassword && !formData.password && !isGuestMode && (
+                      <span className="ml-2 text-xs text-warning font-normal">(Master password required to view)</span>
+                    )}
+                  </label>
                   <div className="relative">
                     <input
                       type={showPassword ? 'text' : 'password'}
@@ -333,7 +378,12 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
               {formData.authMethod === 'key' && (
                 <>
                   <div>
-                    <label className="block text-xs font-medium text-text-muted mb-1.5">Private Key</label>
+                    <label className="block text-xs font-medium text-text-muted mb-1.5">
+                      Private Key
+                      {editingConnection && hasExistingPrivateKey && !formData.privateKey && !isGuestMode && (
+                        <span className="ml-2 text-xs text-warning font-normal">(Master password required to view)</span>
+                      )}
+                    </label>
                     <textarea
                       value={formData.privateKey}
                       onChange={(e) => setFormData({ ...formData, privateKey: e.target.value })}
@@ -341,7 +391,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                       rows={4}
                       className="w-full px-3 py-2 bg-background-light border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:border-primary transition-colors text-sm font-mono resize-none"
                     />
-                    <button 
+                    <button
                       type="button"
                       className="mt-2 flex items-center gap-2 px-3 py-1.5 text-xs bg-background-lighter rounded-lg text-text-secondary hover:text-text-primary transition-colors"
                     >

@@ -24,6 +24,11 @@ import { ROUTES } from '../lib/constants';
 import { useTerminalStore } from '../store/terminalStore';
 import { ShowSaveFileDialog, ShowOpenFileDialog, WriteFile, ReadFile, WriteToTerminal } from '../../wailsjs/go/main/App';
 
+// Check if Wails bindings are available
+const isWailsAvailable = (): boolean => {
+  return typeof window !== 'undefined' && window.go?.main?.App;
+};
+
 export const CommandsPage: React.FC = () => {
   const navigate = useNavigate();
   const { snippets, isLoading, loadSnippets, addSnippet, updateSnippet, deleteSnippet, reorderSnippets, exportSnippets, importSnippets } = useSnippetsStore();
@@ -98,7 +103,7 @@ export const CommandsPage: React.FC = () => {
     // Small delay to ensure terminal is ready
     setTimeout(() => {
       const activeTab = useTerminalStore.getState().tabs.find(t => t.id === useTerminalStore.getState().activeTabId);
-      if (activeTab) {
+      if (activeTab && isWailsAvailable()) {
         WriteToTerminal(activeTab.sessionId, command + '\r');
       }
     }, 300);

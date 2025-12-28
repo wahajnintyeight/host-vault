@@ -118,6 +118,42 @@
     -webkit-user-select: text;
     user-select: text;
   }
+
+  /* Desktop app: Prevent text selection on UI elements */
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    user-drag: none;
+  }
+
+  /* Allow text selection in input fields, textareas, and terminal */
+  input,
+  textarea,
+  .xterm,
+  .xterm *,
+  [contenteditable="true"],
+  [role="textbox"] {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+  }
+
+  /* Allow text selection in code blocks and pre elements */
+  pre,
+  code,
+  .font-mono {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+  }
+
+  /* Allow text selection in specific UI areas where it makes sense */
+  .connection-command,
+  .command-preview,
+  .code-display,
+  .terminal-output {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+  }
 }
 
 @font-face {
@@ -154,4 +190,35 @@
 /* Hide horizontal scrollbar completely */
 .xterm-screen {
   overflow-x: hidden !important;
+}
+
+/* Custom animations for connection overlay */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.4s ease-out;
+}
+
+.animate-fade-in-scale {
+  animation: fadeInScale 0.3s ease-out;
 }

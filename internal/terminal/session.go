@@ -11,12 +11,22 @@ const (
 	SessionTypeSSH   SessionType = "ssh"
 )
 
+type SessionState string
+
+const (
+	SessionStateActive     SessionState = "active"
+	SessionStateInactive   SessionState = "inactive"
+	SessionStateDisconnected SessionState = "disconnected"
+	SessionStateClosed     SessionState = "closed"
+)
+
 type SessionMetadata struct {
 	WorkingDirectory string            `json:"workingDirectory"`
 	Shell            string            `json:"shell"`
 	Environment      map[string]string `json:"environment"`
 	ConnectionID     string            `json:"connectionID,omitempty"`
 	CreatedAt        time.Time         `json:"createdAt"`
+	State            SessionState       `json:"state"`
 }
 
 type Session interface {

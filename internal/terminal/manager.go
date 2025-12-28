@@ -3,6 +3,7 @@ package terminal
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -37,11 +38,14 @@ func (tm *TerminalManager) CreateLocalSession(shell, cwd string, env map[string]
 }
 
 func (tm *TerminalManager) CreateSSHSession(connectionID string, config ConnectionConfig) (string, error) {
+	log.Printf("[TERM] Creating SSH session for connection %s", connectionID)
 	session, err := NewSSHSession(connectionID, config)
 	if err != nil {
-		return "", fmt.Errorf("failed to create SSH session: %w", err)
+		log.Printf("[TERM] Failed to create SSH session for connection %s: %v", connectionID, err)
+		return "", fmt.Errorf("%w", err)
 	}
 
+	log.Printf("[TERM] SSH session %s created successfully", session.ID())
 	tm.mu.Lock()
 	tm.sessions[session.ID()] = session
 	tm.mu.Unlock()
@@ -94,6 +98,7 @@ func (tm *TerminalManager) ResizeSession(sessionID string, cols, rows int) error
 }
 
 func (tm *TerminalManager) CloseSession(sessionID string) error {
+	log.Printf("[TERM] Closing session %s", sessionID)
 	tm.mu.Lock()
 	session, exists := tm.sessions[sessionID]
 	if exists {
@@ -102,15 +107,17 @@ func (tm *TerminalManager) CloseSession(sessionID string) error {
 	tm.mu.Unlock()
 
 	if !exists {
+		log.Printf("[TERM] Session %s not found for closing", sessionID)
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 
 	err := session.Close()
-	
+
 	runtime.EventsEmit(tm.ctx, "terminal:closed", TerminalClosedEvent{
 		SessionID: sessionID,
 	})
 
+	log.Printf("[TERM] Session %s closed successfully", sessionID)
 	return err
 }
 
@@ -128,18 +135,19 @@ func (tm *TerminalManager) GetSessionMetadata(sessionID string) (SessionMetadata
 
 func (tm *TerminalManager) streamOutput(session Session) {
 	sessionID := session.ID()
-	
+	log.Printf("[TERM] Starting output stream for session %s", sessionID)
+
 	for {
 		data := session.ReadOutput()
 		if data == nil {
-			runtime.EventsEmit(tm.ctx, "terminal:closed", TerminalClosedEvent{
+			// Session output stream ended - mark as disconnected but don't close immediately
+			log.Printf("[TERM] Session %s output stream ended - marking as disconnected", sessionID)
+			runtime.EventsEmit(tm.ctx, "terminal:disconnected", TerminalClosedEvent{
 				SessionID: sessionID,
 			})
-			
-			tm.mu.Lock()
-			delete(tm.sessions, sessionID)
-			tm.mu.Unlock()
-			
+
+			// Don't remove from sessions map - allow for potential reconnection
+			// The session will be properly closed when explicitly requested
 			break
 		}
 
@@ -148,6 +156,55 @@ func (tm *TerminalManager) streamOutput(session Session) {
 			Data:      string(data),
 		})
 	}
+	log.Printf("[TERM] Output stream ended for session %s", sessionID)
+}
+
+func (tm *TerminalManager) IsSessionReferenced(sessionID string) bool {
+	// This would need to be called from the frontend to check if a session
+	// is still being used by any tabs/panes. For now, we'll assume sessions
+	// should be kept alive until explicitly closed.
+	return true
+}
+
+func (tm *TerminalManager) ReconnectSession(sessionID string, config ConnectionConfig) error {
+	log.Printf("[TERM] Attempting to reconnect session %s", sessionID)
+	tm.mu.RLock()
+	session, exists := tm.sessions[sessionID]
+	tm.mu.RUnlock()
+
+	if !exists {
+		log.Printf("[TERM] Session %s not found for reconnection", sessionID)
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	if session.Type() != SessionTypeSSH {
+		log.Printf("[TERM] Reconnection not supported for session type: %s", session.Type())
+		return fmt.Errorf("reconnection only supported for SSH sessions")
+	}
+
+	// Cast to SSH session and attempt reconnection
+	sshSession, ok := session.(*SSHSession)
+	if !ok {
+		log.Printf("[TERM] Failed to cast session %s to SSH session", sessionID)
+		return fmt.Errorf("failed to cast session to SSH session")
+	}
+
+	err := sshSession.Reconnect(config)
+	if err != nil {
+		log.Printf("[TERM] Failed to reconnect session %s: %v", sessionID, err)
+		return fmt.Errorf("failed to reconnect session: %w", err)
+	}
+
+	// Restart the output streaming goroutine
+	go tm.streamOutput(session)
+
+	// Emit success event
+	runtime.EventsEmit(tm.ctx, "terminal:reconnected", TerminalClosedEvent{
+		SessionID: sessionID,
+	})
+
+	log.Printf("[TERM] Session %s reconnected successfully", sessionID)
+	return nil
 }
 
 func (tm *TerminalManager) CloseAll() {

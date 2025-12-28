@@ -350,6 +350,23 @@ func (a *App) CloseTerminal(sessionID string) error {
 	return a.terminalManager.CloseSession(sessionID)
 }
 
+// ReconnectTerminal attempts to reconnect a disconnected SSH terminal session
+func (a *App) ReconnectTerminal(sessionID, host string, port int, username, password, privateKey string) error {
+	if a.terminalManager == nil {
+		return errors.New("terminal manager not initialized")
+	}
+
+	config := terminal.ConnectionConfig{
+		Host:       host,
+		Port:       port,
+		Username:   username,
+		Password:   password,
+		PrivateKey: privateKey,
+	}
+
+	return a.terminalManager.ReconnectSession(sessionID, config)
+}
+
 // GetTerminalMetadata returns session metadata
 func (a *App) GetTerminalMetadata(sessionID string) (terminal.SessionMetadata, error) {
 	if a.terminalManager == nil {

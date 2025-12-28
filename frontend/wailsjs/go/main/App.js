@@ -78,6 +78,10 @@ export function ReadFile(arg1) {
   return window['go']['main']['App']['ReadFile'](arg1);
 }
 
+export function ReconnectTerminal(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['ReconnectTerminal'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
 export function ResizeTerminal(arg1, arg2, arg3) {
   return window['go']['main']['App']['ResizeTerminal'](arg1, arg2, arg3);
 }

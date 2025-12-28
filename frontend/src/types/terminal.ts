@@ -3,12 +3,20 @@ export enum SessionType {
   SSH = 'ssh'
 }
 
+export enum SessionState {
+  Active = 'active',
+  Inactive = 'inactive',
+  Disconnected = 'disconnected',
+  Closed = 'closed'
+}
+
 export interface SessionMetadata {
   workingDirectory: string;
   shell: string;
   environment: Record<string, string>;
   connectionID?: string;
   createdAt: string;
+  state: SessionState;
 }
 
 export interface TerminalSession {
@@ -22,7 +30,6 @@ export interface TerminalTab {
   id: string;
   sessionId: string;
   title: string;
-  isActive: boolean;
 }
 
 export enum SplitOrientation {
@@ -55,6 +62,14 @@ export interface TerminalErrorEvent {
 }
 
 export interface TerminalClosedEvent {
+  SessionID: string;
+}
+
+export interface TerminalDisconnectedEvent {
+  SessionID: string;
+}
+
+export interface TerminalReconnectNeededEvent {
   SessionID: string;
 }
 

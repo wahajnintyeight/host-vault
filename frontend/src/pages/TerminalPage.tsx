@@ -9,7 +9,7 @@ import { PanelRightOpen, PanelRightClose, Server } from 'lucide-react';
  * Renders all terminal instances but hides inactive ones to preserve scrollback buffer
  */
 export const TerminalPage: React.FC = () => {
-  const { tabs, activeTabId, removeTab, connectingSessionId } = useTerminalStore();
+  const { tabs, activeTabId, removeTab, connectingSessionId, createLocalTerminal, sessions } = useTerminalStore();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
@@ -17,8 +17,8 @@ export const TerminalPage: React.FC = () => {
   const activeSessionId = activeTab?.sessionId;
   const isConnecting = !!connectingSessionId;
 
-  // Get unique session IDs from all tabs
-  const uniqueSessionIds = [...new Set(tabs.map((t) => t.sessionId))];
+  // Get all session IDs from the sessions store
+  const allSessionIds = Array.from(sessions.keys());
 
   // Callback ref to store terminal handles
   const setTerminalRef = useCallback((sessionId: string, handle: TerminalHandle | null) => {
@@ -31,6 +31,15 @@ export const TerminalPage: React.FC = () => {
 
   // Get the active terminal handle for the drawer
   const activeTerminalRef = activeSessionId ? terminalRefs.current.get(activeSessionId) : null;
+
+  // Initialize with one default local terminal if no tabs exist
+  useEffect(() => {
+    if (tabs.length === 0) {
+      createLocalTerminal().catch((error) => {
+        console.error('Failed to initialize default terminal:', error);
+      });
+    }
+  }, [tabs.length, createLocalTerminal]);
 
   // Keyboard shortcut to toggle drawer (Ctrl+Shift+F)
   useEffect(() => {
@@ -46,16 +55,9 @@ export const TerminalPage: React.FC = () => {
   }, []);
 
   return (
-    <div
-      className="h-full w-full bg-background flex overflow-hidden"
-      style={{
-        margin: '-2rem',
-        width: 'calc(100% + 4rem)',
-        height: 'calc(100% + 4rem)',
-      }}
-    >
+    <div className="h-full bg-background relative overflow-hidden -m-8">
       {/* Terminal area */}
-      <div className="flex-1 relative overflow-hidden">
+      <div className="absolute inset-0">
         {/* Connecting animation overlay */}
         {isConnecting && (
           <div className="absolute inset-0 flex items-center justify-center z-20 bg-background">
@@ -82,11 +84,15 @@ export const TerminalPage: React.FC = () => {
         )}
 
         {/* Render ALL terminal instances, hide inactive ones to preserve scrollback */}
-        {uniqueSessionIds.map((sessionId) => (
+        {allSessionIds.map((sessionId) => (
           <div
             key={sessionId}
             className="absolute inset-0"
-            style={{ display: sessionId === activeSessionId && !isConnecting ? 'block' : 'none' }}
+            style={{
+              display: sessionId === activeSessionId && !isConnecting ? 'block' : 'none',
+              right: isDrawerOpen ? '288px' : '0px', // 288px = w-72 (18rem = 288px)
+              transition: 'right 0.2s ease-in-out'
+            }}
           >
             <Terminal
               ref={(handle) => setTerminalRef(sessionId, handle)}
@@ -99,13 +105,13 @@ export const TerminalPage: React.FC = () => {
           </div>
         ))}
 
-        {/* Empty state when no terminals */}
-        {uniqueSessionIds.length === 0 && !isConnecting && (
+        {/* Fallback empty state (should rarely be seen due to auto-initialization) */}
+        {allSessionIds.length === 0 && !isConnecting && (
           <div className="flex items-center justify-center h-full text-text-muted">
             <div className="text-center">
-              <p className="text-sm">No terminal selected</p>
-              <p className="text-xs mt-1 text-text-muted/70">
-                Click a tab above or + to create a new terminal
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+              <p className="text-xs text-text-muted/70">
+                Initializing terminal...
               </p>
             </div>
           </div>
@@ -119,6 +125,10 @@ export const TerminalPage: React.FC = () => {
               text-text-secondary hover:text-text-primary hover:bg-background-lighter
               transition-colors z-10"
             title={isDrawerOpen ? 'Close drawer (Ctrl+Shift+F)' : 'Open drawer (Ctrl+Shift+F)'}
+            style={{
+              right: isDrawerOpen ? '290px' : '8px', // Account for drawer width + padding
+              transition: 'right 0.2s ease-in-out'
+            }}
           >
             {isDrawerOpen ? (
               <PanelRightClose className="w-4 h-4" />
@@ -129,7 +139,7 @@ export const TerminalPage: React.FC = () => {
         )}
       </div>
 
-      {/* Drawer */}
+      {/* Drawer - absolutely positioned */}
       <TerminalDrawer
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}

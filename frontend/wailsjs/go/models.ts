@@ -7,6 +7,7 @@ export namespace terminal {
 	    connectionID?: string;
 	    // Go type: time
 	    createdAt: any;
+	    state: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SessionMetadata(source);
@@ -19,6 +20,7 @@ export namespace terminal {
 	        this.environment = source["environment"];
 	        this.connectionID = source["connectionID"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.state = source["state"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
