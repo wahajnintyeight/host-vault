@@ -117,6 +117,7 @@ export const ROUTES = {
   CONNECTIONS: '/connections',
   COMMANDS: '/commands',
   SETTINGS: '/settings',
+  TERMINAL: '/terminal',
 } as const;
 
 // Validation Rules

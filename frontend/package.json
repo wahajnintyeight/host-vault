@@ -9,7 +9,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@headlessui/react": "^1.7.17",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^6.0.0",
     "axios": "^1.6.2",
     "clsx": "^2.0.0",
     "crypto-js": "^4.2.0",
@@ -17,6 +23,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.20.0",
+    "uuid": "^13.0.0",
     "zustand": "^4.4.7"
   },
   "devDependencies": {
@@ -24,6 +31,7 @@
     "@types/node": "^25.0.3",
     "@types/react": "^18.0.17",
     "@types/react-dom": "^18.0.6",
+    "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^2.0.1",
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.32",

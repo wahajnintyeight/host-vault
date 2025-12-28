@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"host-vault/internal/terminal"
 	"os"
 	"path/filepath"
 
@@ -12,7 +13,8 @@ import (
 
 // App struct
 type App struct {
-	ctx context.Context
+	ctx             context.Context
+	terminalManager *terminal.TerminalManager
 }
 
 // NewApp creates a new App application struct
@@ -24,6 +26,7 @@ func NewApp() *App {
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.terminalManager = terminal.NewTerminalManager(ctx)
 }
 
 // Greet returns a greeting for the given name
@@ -235,10 +238,78 @@ func (a *App) WindowMaximize() {
 
 // WindowClose closes the window
 func (a *App) WindowClose() {
+	if a.terminalManager != nil {
+		a.terminalManager.CloseAll()
+	}
 	runtime.Quit(a.ctx)
 }
 
 // WindowIsMaximised checks if window is maximized
 func (a *App) WindowIsMaximised() bool {
 	return runtime.WindowIsMaximised(a.ctx)
+}
+
+// CreateLocalTerminal creates a new local terminal session
+func (a *App) CreateLocalTerminal(shell, cwd string, env map[string]string) (string, error) {
+	if a.terminalManager == nil {
+		return "", errors.New("terminal manager not initialized")
+	}
+	return a.terminalManager.CreateLocalSession(shell, cwd, env)
+}
+
+// CreateSSHTerminal creates a new SSH terminal session
+func (a *App) CreateSSHTerminal(host string, port int, username, password, privateKey string) (string, error) {
+	if a.terminalManager == nil {
+		return "", errors.New("terminal manager not initialized")
+	}
+	
+	config := terminal.ConnectionConfig{
+		Host:       host,
+		Port:       port,
+		Username:   username,
+		Password:   password,
+		PrivateKey: privateKey,
+	}
+	
+	return a.terminalManager.CreateSSHSession("", config)
+}
+
+// DuplicateTerminal duplicates an existing terminal session
+func (a *App) DuplicateTerminal(sessionID string) (string, error) {
+	if a.terminalManager == nil {
+		return "", errors.New("terminal manager not initialized")
+	}
+	return a.terminalManager.DuplicateSession(sessionID)
+}
+
+// WriteToTerminal writes user input to terminal
+func (a *App) WriteToTerminal(sessionID string, data string) error {
+	if a.terminalManager == nil {
+		return errors.New("terminal manager not initialized")
+	}
+	return a.terminalManager.WriteToSession(sessionID, []byte(data))
+}
+
+// ResizeTerminal resizes terminal dimensions
+func (a *App) ResizeTerminal(sessionID string, cols, rows int) error {
+	if a.terminalManager == nil {
+		return errors.New("terminal manager not initialized")
+	}
+	return a.terminalManager.ResizeSession(sessionID, cols, rows)
+}
+
+// CloseTerminal closes a terminal session
+func (a *App) CloseTerminal(sessionID string) error {
+	if a.terminalManager == nil {
+		return errors.New("terminal manager not initialized")
+	}
+	return a.terminalManager.CloseSession(sessionID)
+}
+
+// GetTerminalMetadata returns session metadata
+func (a *App) GetTerminalMetadata(sessionID string) (terminal.SessionMetadata, error) {
+	if a.terminalManager == nil {
+		return terminal.SessionMetadata{}, errors.New("terminal manager not initialized")
+	}
+	return a.terminalManager.GetSessionMetadata(sessionID)
 }

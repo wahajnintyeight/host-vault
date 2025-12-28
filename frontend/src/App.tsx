@@ -12,6 +12,7 @@ import { useAuthStore } from './store/authStore';
 import { useUserConfigStore } from './store/userConfigStore';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { SettingsPage } from './pages/SettingsPage';
+import { TerminalPage } from './pages/TerminalPage';
 import { applyTheme } from './lib/themes';
 
 function App() {
@@ -106,6 +107,16 @@ function App() {
               <ProtectedRoute requireMasterPassword>
                 <MainLayout>
                   <SettingsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path={ROUTES.TERMINAL}
+            element={
+              <ProtectedRoute requireMasterPassword>
+                <MainLayout>
+                  <TerminalPage />
                 </MainLayout>
               </ProtectedRoute>
             }

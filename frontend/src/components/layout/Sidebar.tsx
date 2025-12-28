@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Home, Server, Code, Settings } from 'lucide-react';
+import { Home, Server, Code, Terminal, Settings } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ROUTES } from '../../lib/constants';
 import { useUserConfigStore } from '../../store/userConfigStore';
@@ -15,6 +15,7 @@ const navItems: NavItem[] = [
   { label: 'Dashboard', path: ROUTES.DASHBOARD, icon: <Home size={20} /> },
   { label: 'Connections', path: ROUTES.CONNECTIONS, icon: <Server size={20} /> },
   { label: 'Commands', path: ROUTES.COMMANDS, icon: <Code size={20} /> },
+  { label: 'Terminal', path: ROUTES.TERMINAL, icon: <Terminal size={20} /> },
   { label: 'Settings', path: ROUTES.SETTINGS, icon: <Settings size={20} /> },
 ];
 
