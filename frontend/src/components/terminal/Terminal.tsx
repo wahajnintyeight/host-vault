@@ -176,6 +176,8 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, onClose
       allowTransparency: false,
       scrollback: 10000,
       lineHeight: 1.2,
+      wordSeparator: ' ',
+      scrollOnUserInput: true,
     });
 
     const fitAddon = new FitAddon();

@@ -127,3 +127,31 @@
     src: local(""),
     url("assets/fonts/nunito-v16-latin-regular.woff2") format("woff2");
 }
+
+/* Terminal xterm.js customizations */
+.xterm-viewport {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+
+.xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+
+.xterm-viewport::-webkit-scrollbar-track {
+  background: var(--color-background);
+}
+
+.xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--color-background-lighter);
+  border-radius: 4px;
+}
+
+.xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Hide horizontal scrollbar completely */
+.xterm-screen {
+  overflow-x: hidden !important;
+}

@@ -42,11 +42,10 @@ export const UserMenu: React.FC = () => {
             className={cn(
               'flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-200',
               'hover:bg-background focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background-light',
-              'hover:scale-105 active:scale-95',
               open && 'bg-background'
             )}
           >
-            <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center border-2 border-primary/30">
+            <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center ">
               <span className="text-xs font-semibold text-primary">{getInitials()}</span>
             </div>
             <div className="flex flex-col items-start">
@@ -66,7 +65,7 @@ export const UserMenu: React.FC = () => {
             />
           </Menu.Button>
 
-          <Transition
+          {/* <Transition
             as={React.Fragment}
             enter="transition ease-out duration-100"
             enterFrom="transform opacity-0 scale-95"
@@ -74,7 +73,7 @@ export const UserMenu: React.FC = () => {
             leave="transition ease-in duration-75"
             leaveFrom="transform opacity-100 scale-100"
             leaveTo="transform opacity-0 scale-95"
-          >
+          > */}
             <Menu.Items
               className={cn(
                 'absolute right-0 mt-2 w-56 origin-top-right rounded-lg',
@@ -87,9 +86,6 @@ export const UserMenu: React.FC = () => {
                 <p className="text-sm font-medium text-text-primary">
                   {user?.email || 'Guest User'}
                 </p>
-                {isGuestMode && (
-                  <p className="text-xs text-warning mt-1">Guest Mode Active</p>
-                )}
               </div>
 
               <div className="py-1">
@@ -152,7 +148,7 @@ export const UserMenu: React.FC = () => {
                 )}
               </div>
             </Menu.Items>
-          </Transition>
+          {/* </Transition> */}
         </>
       )}
     </Menu>

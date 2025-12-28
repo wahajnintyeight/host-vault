@@ -23,6 +23,7 @@ interface TerminalStore {
   tabs: TerminalTab[];
   activeTabId: string | null;
   layout: LayoutNode;
+  connectingSessionId: string | null;
 
   // Session management
   addSession: (session: TerminalSession) => void;
@@ -46,6 +47,7 @@ interface TerminalStore {
   createLocalTerminal: (shell?: string, cwd?: string) => Promise<string>;
   createSSHTerminal: (host: string, port: number, username: string, password: string, privateKey?: string) => Promise<string>;
   closeTerminal: (sessionId: string) => Promise<void>;
+  setConnecting: (sessionId: string | null) => void;
 
   // Cleanup
   reset: () => void;
@@ -57,6 +59,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   tabs: [],
   activeTabId: null,
   layout: { id: 'root', sessionId: '' } as TerminalPane,
+  connectingSessionId: null,
 
   // Session management
   addSession: (session) => {
@@ -234,6 +237,9 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   },
 
   createSSHTerminal: async (host, port, username, password, privateKey = '') => {
+    const tempId = `connecting-${uuid()}`;
+    set({ connectingSessionId: tempId });
+    
     try {
       const sessionId = await CreateSSHTerminal(host, port, username, password, privateKey);
 
@@ -259,12 +265,18 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       };
 
       get().addTab(tab);
+      set({ connectingSessionId: null });
       
       return sessionId;
     } catch (error) {
+      set({ connectingSessionId: null });
       console.error('Failed to create SSH terminal:', error);
       throw error;
     }
+  },
+
+  setConnecting: (sessionId) => {
+    set({ connectingSessionId: sessionId });
   },
 
   closeTerminal: async (sessionId) => {
