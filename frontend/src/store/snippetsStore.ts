@@ -14,6 +14,7 @@ export interface Snippet {
   command: string;
   description?: string;
   createdAt: number;
+  order: number;
 }
 
 interface SnippetsData {
@@ -24,9 +25,10 @@ interface SnippetsData {
 interface SnippetsState {
   snippets: Snippet[];
   isLoading: boolean;
-  addSnippet: (snippet: Omit<Snippet, 'id' | 'createdAt'>) => Promise<void>;
+  addSnippet: (snippet: Omit<Snippet, 'id' | 'createdAt' | 'order'>) => Promise<void>;
   updateSnippet: (id: string, updates: Partial<Omit<Snippet, 'id' | 'createdAt'>>) => Promise<void>;
   deleteSnippet: (id: string) => Promise<void>;
+  reorderSnippets: (activeId: string, overId: string) => Promise<void>;
   loadSnippets: () => Promise<void>;
   exportSnippets: () => string;
   importSnippets: (json: string) => Promise<boolean>;
@@ -55,7 +57,12 @@ const loadFromFile = async (): Promise<Snippet[]> => {
     const content = await ReadFile(path);
     if (!content) return [];
     const data: SnippetsData = JSON.parse(content);
-    return data.snippets || [];
+    // Ensure all snippets have order, migrate old data
+    const snippets = (data.snippets || []).map((s, i) => ({
+      ...s,
+      order: s.order ?? i,
+    }));
+    return snippets.sort((a, b) => a.order - b.order);
   } catch (error) {
     console.error('Failed to load snippets from file:', error);
     return loadFromLocalStorage();
@@ -84,7 +91,11 @@ const loadFromLocalStorage = (): Snippet[] => {
     const stored = localStorage.getItem(key);
     if (stored) {
       const data = JSON.parse(stored);
-      return data.snippets || [];
+      const snippets = (data.snippets || []).map((s: Snippet, i: number) => ({
+        ...s,
+        order: s.order ?? i,
+      }));
+      return snippets.sort((a: Snippet, b: Snippet) => a.order - b.order);
     }
   } catch (error) {
     console.error('Failed to load snippets from localStorage:', error);
@@ -113,12 +124,15 @@ export const useSnippetsStore = create<SnippetsState>()((set, get) => ({
   },
 
   addSnippet: async (snippet) => {
+    const currentSnippets = get().snippets;
+    const maxOrder = currentSnippets.length > 0 ? Math.max(...currentSnippets.map(s => s.order)) : -1;
     const newSnippet: Snippet = {
       ...snippet,
       id: crypto.randomUUID(),
       createdAt: Date.now(),
+      order: maxOrder + 1,
     };
-    const updated = [...get().snippets, newSnippet];
+    const updated = [...currentSnippets, newSnippet];
     set({ snippets: updated });
     await saveToFile(updated);
   },
@@ -131,8 +145,26 @@ export const useSnippetsStore = create<SnippetsState>()((set, get) => ({
 
   deleteSnippet: async (id) => {
     const updated = get().snippets.filter((s) => s.id !== id);
-    set({ snippets: updated });
-    await saveToFile(updated);
+    // Reindex order after deletion
+    const reindexed = updated.map((s, i) => ({ ...s, order: i }));
+    set({ snippets: reindexed });
+    await saveToFile(reindexed);
+  },
+
+  reorderSnippets: async (activeId, overId) => {
+    const snippets = [...get().snippets];
+    const oldIndex = snippets.findIndex(s => s.id === activeId);
+    const newIndex = snippets.findIndex(s => s.id === overId);
+    
+    if (oldIndex === -1 || newIndex === -1) return;
+    
+    const [removed] = snippets.splice(oldIndex, 1);
+    snippets.splice(newIndex, 0, removed);
+    
+    // Update order values
+    const reordered = snippets.map((s, i) => ({ ...s, order: i }));
+    set({ snippets: reordered });
+    await saveToFile(reordered);
   },
 
   exportSnippets: () => {

@@ -146,7 +146,7 @@ func (a *App) GetUserConfigPath(userId string) (string, error) {
 }
 
 // GetGuestSnippetsPath returns the path to the guest snippets file
-// Path: %APPDATA%\host-vault\guest\snippets.json
+// Path: %APPDATA%\host-vault\guest\commands.json
 func (a *App) GetGuestSnippetsPath() (string, error) {
 	appPath, err := a.GetAppDataPath()
 	if err != nil {
@@ -159,11 +159,11 @@ func (a *App) GetGuestSnippetsPath() (string, error) {
 		return "", fmt.Errorf("failed to create guest directory: %w", err)
 	}
 
-	return filepath.Join(guestPath, "snippets.json"), nil
+	return filepath.Join(guestPath, "commands.json"), nil
 }
 
 // GetUserSnippetsPath returns the path to a user's snippets file
-// Path: %APPDATA%\host-vault\users\{userId}\snippets.json
+// Path: %APPDATA%\host-vault\users\{userId}\commands.json
 func (a *App) GetUserSnippetsPath(userId string) (string, error) {
 	appPath, err := a.GetAppDataPath()
 	if err != nil {
@@ -176,7 +176,7 @@ func (a *App) GetUserSnippetsPath(userId string) (string, error) {
 		return "", fmt.Errorf("failed to create user directory: %w", err)
 	}
 
-	return filepath.Join(userPath, "snippets.json"), nil
+	return filepath.Join(userPath, "commands.json"), nil
 }
 
 // ShowMessageDialog shows a native Windows message dialog
@@ -189,16 +189,26 @@ func (a *App) ShowMessageDialog(title string, message string, dialogType string)
 }
 
 // ShowOpenFileDialog shows a native Windows file open dialog
-func (a *App) ShowOpenFileDialog(title string, filters string) (string, error) {
-	// TODO: Implement Windows file dialog using Windows API
-	// filters format: "JSON Files (*.json)|*.json|All Files (*.*)|*.*"
-	return "", errors.New("Native file dialog not yet implemented")
+func (a *App) ShowOpenFileDialog(title string, fileType string) (string, error) {
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: title,
+		Filters: []runtime.FileFilter{
+			{DisplayName: "JSON Files (*.json)", Pattern: "*.json"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		},
+	})
 }
 
 // ShowSaveFileDialog shows a native Windows file save dialog
-func (a *App) ShowSaveFileDialog(title string, defaultFilename string, filters string) (string, error) {
-	// TODO: Implement Windows file dialog using Windows API
-	return "", errors.New("Native file dialog not yet implemented")
+func (a *App) ShowSaveFileDialog(title string, defaultFilename string, fileType string) (string, error) {
+	return runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           title,
+		DefaultFilename: defaultFilename,
+		Filters: []runtime.FileFilter{
+			{DisplayName: "JSON Files (*.json)", Pattern: "*.json"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		},
+	})
 }
 
 // FileExists checks if a file exists

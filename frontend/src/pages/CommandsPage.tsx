@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   Plus,
   Search,
-  Play,
   Edit2,
   Trash2,
   Copy,
@@ -14,21 +13,32 @@ import {
   X,
   Check,
   Terminal,
+  GripVertical,
 } from 'lucide-react';
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, DragOverlay } from '@dnd-kit/core';
+import { SortableContext, sortableKeyboardCoordinates, useSortable, rectSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useSnippetsStore, Snippet } from '../store/snippetsStore';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '../lib/constants';
 import { useTerminalStore } from '../store/terminalStore';
+import { ShowSaveFileDialog, ShowOpenFileDialog, WriteFile, ReadFile, WriteToTerminal } from '../../wailsjs/go/main/App';
 
 export const CommandsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { snippets, isLoading, loadSnippets, addSnippet, updateSnippet, deleteSnippet, exportSnippets, importSnippets } = useSnippetsStore();
+  const { snippets, isLoading, loadSnippets, addSnippet, updateSnippet, deleteSnippet, reorderSnippets, exportSnippets, importSnippets } = useSnippetsStore();
   const { tabs, createLocalTerminal } = useTerminalStore();
   
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingCommand, setEditingCommand] = useState<Snippet | null>(null);
   const [formData, setFormData] = useState({ name: '', command: '', description: '' });
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
   useEffect(() => {
     loadSnippets();
@@ -39,6 +49,20 @@ export const CommandsPage: React.FC = () => {
     cmd.command.toLowerCase().includes(searchQuery.toLowerCase()) ||
     cmd.description?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const activeCommand = activeId ? snippets.find(s => s.id === activeId) : null;
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveId(null);
+    if (over && active.id !== over.id) {
+      reorderSnippets(active.id as string, over.id as string);
+    }
+  };
 
   const handleSave = async () => {
     if (!formData.name || !formData.command) return;
@@ -73,7 +97,6 @@ export const CommandsPage: React.FC = () => {
     navigate(ROUTES.TERMINAL);
     // Small delay to ensure terminal is ready
     setTimeout(() => {
-      const { WriteToTerminal } = window as any;
       const activeTab = useTerminalStore.getState().tabs.find(t => t.id === useTerminalStore.getState().activeTabId);
       if (activeTab) {
         WriteToTerminal(activeTab.sessionId, command + '\r');
@@ -81,29 +104,48 @@ export const CommandsPage: React.FC = () => {
     }, 300);
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     const data = exportSnippets();
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'commands.json';
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const filePath = await ShowSaveFileDialog('Export Commands', 'commands.json', 'json');
+      if (filePath) {
+        await WriteFile(filePath, data);
+      }
+    } catch (error) {
+      console.error('Export failed:', error);
+      // Fallback to browser download
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'commands.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
   };
 
-  const handleImport = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) {
-        const text = await file.text();
-        await importSnippets(text);
+  const handleImport = async () => {
+    try {
+      const filePath = await ShowOpenFileDialog('Import Commands', 'json');
+      if (filePath) {
+        const content = await ReadFile(filePath);
+        await importSnippets(content);
       }
-    };
-    input.click();
+    } catch (error) {
+      console.error('Import failed:', error);
+      // Fallback to browser file input
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json';
+      input.onchange = async (e) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (file) {
+          const text = await file.text();
+          await importSnippets(text);
+        }
+      };
+      input.click();
+    }
   };
 
   const formatDate = (timestamp: number) => {
@@ -194,19 +236,39 @@ export const CommandsPage: React.FC = () => {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredCommands.map((cmd) => (
-            <CommandCard
-              key={cmd.id}
-              command={cmd}
-              onEdit={() => handleEdit(cmd)}
-              onDelete={() => handleDelete(cmd.id)}
-              onCopy={() => handleCopy(cmd.command)}
-              onRun={() => handleRunCommand(cmd.command)}
-              formatDate={formatDate}
-            />
-          ))}
-        </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <SortableContext items={searchQuery ? filteredCommands.map(c => c.id) : snippets.map(c => c.id)} strategy={rectSortingStrategy}>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {(searchQuery ? filteredCommands : snippets).map((cmd) => (
+                <SortableCommandCard
+                  key={cmd.id}
+                  command={cmd}
+                  onEdit={() => handleEdit(cmd)}
+                  onDelete={() => handleDelete(cmd.id)}
+                  onCopy={() => handleCopy(cmd.command)}
+                  onRun={() => handleRunCommand(cmd.command)}
+                  formatDate={formatDate}
+                  isDraggable={!searchQuery}
+                />
+              ))}
+            </div>
+          </SortableContext>
+          <DragOverlay>
+            {activeCommand ? (
+              <div className="opacity-90 shadow-2xl rotate-2 scale-105">
+                <CommandCard
+                  command={activeCommand}
+                  onEdit={() => {}}
+                  onDelete={() => {}}
+                  onCopy={() => {}}
+                  onRun={() => {}}
+                  formatDate={formatDate}
+                  isDraggable={false}
+                />
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       )}
 
       {/* Add/Edit Modal */}
@@ -286,9 +348,11 @@ interface CommandCardProps {
   onCopy: () => void;
   onRun: () => void;
   formatDate: (timestamp: number) => string;
+  isDraggable?: boolean;
+  dragHandleProps?: React.HTMLAttributes<HTMLDivElement>;
 }
 
-const CommandCard: React.FC<CommandCardProps> = ({ command, onEdit, onDelete, onCopy, onRun, formatDate }) => {
+const CommandCard: React.FC<CommandCardProps> = ({ command, onEdit, onDelete, onCopy, onRun, formatDate, isDraggable, dragHandleProps }) => {
   const [showCopied, setShowCopied] = useState(false);
 
   const handleCopy = () => {
@@ -300,11 +364,18 @@ const CommandCard: React.FC<CommandCardProps> = ({ command, onEdit, onDelete, on
   return (
     <div className="group bg-background-light border border-border rounded-xl p-4 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all duration-200">
       <div className="flex items-start justify-between mb-3">
-        <div className="flex-1 min-w-0">
-          <h3 className="font-medium text-text-primary truncate">{command.name}</h3>
-          {command.description && (
-            <p className="text-xs text-text-muted mt-0.5 truncate">{command.description}</p>
+        <div className="flex items-start gap-2 flex-1 min-w-0">
+          {isDraggable && dragHandleProps && (
+            <div {...dragHandleProps} className="cursor-grab active:cursor-grabbing p-1 -ml-1 text-text-muted hover:text-text-secondary">
+              <GripVertical className="w-4 h-4" />
+            </div>
           )}
+          <div className="flex-1 min-w-0">
+            <h3 className="font-medium text-text-primary truncate">{command.name}</h3>
+            {command.description && (
+              <p className="text-xs text-text-muted mt-0.5 truncate">{command.description}</p>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
@@ -352,6 +423,29 @@ const CommandCard: React.FC<CommandCardProps> = ({ command, onEdit, onDelete, on
           </button>
         </div>
       </div>
+    </div>
+  );
+};
+
+const SortableCommandCard: React.FC<CommandCardProps> = (props) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ 
+    id: props.command.id,
+    transition: {
+      duration: 250,
+      easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
+    },
+  });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition: transition || 'transform 250ms cubic-bezier(0.25, 1, 0.5, 1)',
+    opacity: isDragging ? 0.4 : 1,
+    scale: isDragging ? 0.98 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <CommandCard {...props} dragHandleProps={props.isDraggable ? { ...attributes, ...listeners } : undefined} />
     </div>
   );
 };
