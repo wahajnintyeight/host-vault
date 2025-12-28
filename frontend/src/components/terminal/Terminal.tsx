@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
 import { TerminalOutputEvent, TerminalClosedEvent } from '../../types/terminal';
 import { WriteToTerminal, ResizeTerminal } from '../../../wailsjs/go/main/App';
@@ -14,6 +15,14 @@ interface TerminalProps {
   onClose?: () => void;
 }
 
+export interface TerminalHandle {
+  search: (query: string) => boolean;
+  searchNext: (query: string) => boolean;
+  searchPrevious: (query: string) => boolean;
+  clearSearch: () => void;
+  writeCommand: (command: string) => void;
+}
+
 // Font size constraints
 const MIN_FONT_SIZE = 8;
 const MAX_FONT_SIZE = 32;
@@ -21,33 +30,87 @@ const DEFAULT_FONT_SIZE = 14;
 
 /**
  * Terminal component that wraps xterm.js and integrates with the Wails backend.
- * 
- * Features:
- * - Theme-aware styling that matches the app theme (updates on theme change)
- * - Zoom in/out with Ctrl++ / Ctrl+- / Ctrl+0
- * - Auto-fit on resize with debouncing
- * - Web links support
- * - Bidirectional communication with backend
  */
-const Terminal: React.FC<TerminalProps> = ({ sessionId, onClose }) => {
+const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, onClose }, ref) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
-  
-  // Get current theme from store to react to changes
+
   const { config } = useUserConfigStore();
+
+  // Expose search methods to parent
+  useImperativeHandle(ref, () => ({
+    search: (query: string) => {
+      if (searchAddonRef.current && query) {
+        return searchAddonRef.current.findNext(query, {
+          caseSensitive: false,
+          regex: false,
+          decorations: {
+            matchBackground: '#FFFF0050',
+            matchBorder: '#FFFF00',
+            matchOverviewRuler: '#FFFF00',
+            activeMatchBackground: '#FF880080',
+            activeMatchBorder: '#FF8800',
+            activeMatchColorOverviewRuler: '#FF8800',
+          },
+        });
+      }
+      return false;
+    },
+    searchNext: (query: string) => {
+      if (searchAddonRef.current && query) {
+        return searchAddonRef.current.findNext(query, {
+          caseSensitive: false,
+          regex: false,
+          decorations: {
+            matchBackground: '#FFFF0050',
+            matchBorder: '#FFFF00',
+            matchOverviewRuler: '#FFFF00',
+            activeMatchBackground: '#FF880080',
+            activeMatchBorder: '#FF8800',
+            activeMatchColorOverviewRuler: '#FF8800',
+          },
+        });
+      }
+      return false;
+    },
+    searchPrevious: (query: string) => {
+      if (searchAddonRef.current && query) {
+        return searchAddonRef.current.findPrevious(query, {
+          caseSensitive: false,
+          regex: false,
+          decorations: {
+            matchBackground: '#FFFF0050',
+            matchBorder: '#FFFF00',
+            matchOverviewRuler: '#FFFF00',
+            activeMatchBackground: '#FF880080',
+            activeMatchBorder: '#FF8800',
+            activeMatchColorOverviewRuler: '#FF8800',
+          },
+        });
+      }
+      return false;
+    },
+    clearSearch: () => {
+      searchAddonRef.current?.clearDecorations();
+    },
+    writeCommand: (command: string) => {
+      if (sessionId) {
+        WriteToTerminal(sessionId, command).catch(console.error);
+      }
+    },
+  }));
 
   // Update terminal theme when app theme changes
   useEffect(() => {
     if (xtermRef.current) {
-      // Small delay to ensure CSS variables are updated
       setTimeout(() => {
         const newTheme = getTerminalThemeFromCSS();
         xtermRef.current!.options.theme = newTheme;
-        // Force a refresh by writing an empty string
         xtermRef.current!.refresh(0, xtermRef.current!.rows - 1);
       }, 100);
     }
@@ -61,21 +124,18 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, onClose }) => {
         return;
       }
 
-      // Ctrl++ or Ctrl+= (zoom in)
       if (e.ctrlKey && (e.key === '+' || e.key === '=')) {
         e.preventDefault();
         setFontSize((prev) => Math.min(MAX_FONT_SIZE, prev + 1));
         return;
       }
 
-      // Ctrl+- (zoom out)
       if (e.ctrlKey && e.key === '-') {
         e.preventDefault();
         setFontSize((prev) => Math.max(MIN_FONT_SIZE, prev - 1));
         return;
       }
 
-      // Ctrl+0 (reset zoom)
       if (e.ctrlKey && e.key === '0') {
         e.preventDefault();
         setFontSize(DEFAULT_FONT_SIZE);
@@ -97,9 +157,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, onClose }) => {
           fitAddonRef.current.fit();
           const cols = xtermRef.current.cols;
           const rows = xtermRef.current.rows;
-          ResizeTerminal(sessionId, cols, rows).catch((error) => {
-            console.error('Failed to resize terminal after zoom:', error);
-          });
+          ResizeTerminal(sessionId, cols, rows).catch(console.error);
         }
       }, 0);
     }
@@ -108,10 +166,8 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, onClose }) => {
   useEffect(() => {
     if (!terminalRef.current) return;
 
-    // Get theme from CSS variables
     const theme = getTerminalThemeFromCSS();
 
-    // Initialize xterm.js terminal
     const term = new XTerm({
       cursorBlink: true,
       fontSize,
@@ -122,52 +178,41 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, onClose }) => {
       lineHeight: 1.2,
     });
 
-    // Initialize addons
     const fitAddon = new FitAddon();
     const webLinksAddon = new WebLinksAddon();
+    const searchAddon = new SearchAddon();
 
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
+    term.loadAddon(searchAddon);
 
-    // Open terminal in container
     term.open(terminalRef.current);
-
-    // Initial fit
     fitAddon.fit();
 
-    // Store refs
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
+    searchAddonRef.current = searchAddon;
 
-    // Send initial resize to backend after fit
     const cols = term.cols;
     const rows = term.rows;
-    ResizeTerminal(sessionId, cols, rows).catch((error) => {
-      console.error('Failed to send initial resize:', error);
-    });
+    ResizeTerminal(sessionId, cols, rows).catch(console.error);
 
-    // Handle user input - send to backend
     const inputDisposable = term.onData((data) => {
-      WriteToTerminal(sessionId, data).catch((error) => {
-        console.error('Failed to write to terminal:', error);
-      });
+      WriteToTerminal(sessionId, data).catch(console.error);
     });
 
-    // Listen for terminal output from backend
     EventsOn('terminal:output', (event: TerminalOutputEvent) => {
       if (event.SessionID === sessionId && xtermRef.current) {
         xtermRef.current.write(event.Data);
       }
     });
 
-    // Listen for terminal closed events
     EventsOn('terminal:closed', (event: TerminalClosedEvent) => {
       if (event.SessionID === sessionId) {
         onClose?.();
       }
     });
 
-    // Setup resize observer with debouncing
     const handleResize = () => {
       if (resizeTimeoutRef.current) {
         clearTimeout(resizeTimeoutRef.current);
@@ -179,9 +224,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, onClose }) => {
             fitAddonRef.current.fit();
             const cols = xtermRef.current.cols;
             const rows = xtermRef.current.rows;
-            ResizeTerminal(sessionId, cols, rows).catch((error) => {
-              console.error('Failed to resize terminal:', error);
-            });
+            ResizeTerminal(sessionId, cols, rows).catch(console.error);
           } catch (error) {
             console.error('Failed to fit terminal:', error);
           }
@@ -194,27 +237,21 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, onClose }) => {
       resizeObserverRef.current.observe(terminalRef.current);
     }
 
-    // Cleanup function
     return () => {
-      if (resizeTimeoutRef.current) {
-        clearTimeout(resizeTimeoutRef.current);
-      }
-
+      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current);
       if (resizeObserverRef.current) {
         resizeObserverRef.current.disconnect();
         resizeObserverRef.current = null;
       }
-
       inputDisposable.dispose();
       EventsOff('terminal:output');
       EventsOff('terminal:closed');
-
       if (xtermRef.current) {
         xtermRef.current.dispose();
         xtermRef.current = null;
       }
-
       fitAddonRef.current = null;
+      searchAddonRef.current = null;
     };
   }, [sessionId, onClose]);
 
@@ -225,6 +262,8 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, onClose }) => {
       tabIndex={0}
     />
   );
-};
+});
+
+Terminal.displayName = 'Terminal';
 
 export default Terminal;

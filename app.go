@@ -61,14 +61,14 @@ func (a *App) GetAppDataPath() (string, error) {
 	if appDataDir == "" {
 		return "", errors.New("APPDATA environment variable not set")
 	}
-	
+
 	appPath := filepath.Join(appDataDir, "host-vault")
-	
+
 	// Create directory if it doesn't exist
 	if err := os.MkdirAll(appPath, 0755); err != nil {
 		return "", fmt.Errorf("failed to create app data directory: %w", err)
 	}
-	
+
 	return appPath, nil
 }
 
@@ -78,15 +78,15 @@ func (a *App) GetDatabasePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	dbPath := filepath.Join(appPath, "db", "main.db")
-	
+
 	// Create db directory if it doesn't exist
 	dbDir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create db directory: %w", err)
 	}
-	
+
 	return dbPath, nil
 }
 
@@ -96,14 +96,14 @@ func (a *App) GetBackupPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	backupPath := filepath.Join(appPath, "backups")
-	
+
 	// Create backups directory if it doesn't exist
 	if err := os.MkdirAll(backupPath, 0755); err != nil {
 		return "", fmt.Errorf("failed to create backups directory: %w", err)
 	}
-	
+
 	return backupPath, nil
 }
 
@@ -114,14 +114,14 @@ func (a *App) GetGuestConfigPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	guestPath := filepath.Join(appPath, "guest")
-	
+
 	// Create guest directory if it doesn't exist
 	if err := os.MkdirAll(guestPath, 0755); err != nil {
 		return "", fmt.Errorf("failed to create guest directory: %w", err)
 	}
-	
+
 	configPath := filepath.Join(guestPath, "config.json")
 	return configPath, nil
 }
@@ -133,16 +133,50 @@ func (a *App) GetUserConfigPath(userId string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	userPath := filepath.Join(appPath, "users", userId)
-	
+
 	// Create user directory if it doesn't exist
 	if err := os.MkdirAll(userPath, 0755); err != nil {
 		return "", fmt.Errorf("failed to create user directory: %w", err)
 	}
-	
+
 	configPath := filepath.Join(userPath, "config.json")
 	return configPath, nil
+}
+
+// GetGuestSnippetsPath returns the path to the guest snippets file
+// Path: %APPDATA%\host-vault\guest\snippets.json
+func (a *App) GetGuestSnippetsPath() (string, error) {
+	appPath, err := a.GetAppDataPath()
+	if err != nil {
+		return "", err
+	}
+
+	guestPath := filepath.Join(appPath, "guest")
+
+	if err := os.MkdirAll(guestPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create guest directory: %w", err)
+	}
+
+	return filepath.Join(guestPath, "snippets.json"), nil
+}
+
+// GetUserSnippetsPath returns the path to a user's snippets file
+// Path: %APPDATA%\host-vault\users\{userId}\snippets.json
+func (a *App) GetUserSnippetsPath(userId string) (string, error) {
+	appPath, err := a.GetAppDataPath()
+	if err != nil {
+		return "", err
+	}
+
+	userPath := filepath.Join(appPath, "users", userId)
+
+	if err := os.MkdirAll(userPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create user directory: %w", err)
+	}
+
+	return filepath.Join(userPath, "snippets.json"), nil
 }
 
 // ShowMessageDialog shows a native Windows message dialog
@@ -189,11 +223,11 @@ func (a *App) WriteFile(filePath string, data string) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
-	
+
 	if err := os.WriteFile(filePath, []byte(data), 0644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -211,14 +245,14 @@ func (a *App) ListFiles(dirPath string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read directory: %w", err)
 	}
-	
+
 	var files []string
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			files = append(files, entry.Name())
 		}
 	}
-	
+
 	return files, nil
 }
 
@@ -262,7 +296,7 @@ func (a *App) CreateSSHTerminal(host string, port int, username, password, priva
 	if a.terminalManager == nil {
 		return "", errors.New("terminal manager not initialized")
 	}
-	
+
 	config := terminal.ConnectionConfig{
 		Host:       host,
 		Port:       port,
@@ -270,7 +304,7 @@ func (a *App) CreateSSHTerminal(host string, port int, username, password, priva
 		Password:   password,
 		PrivateKey: privateKey,
 	}
-	
+
 	return a.terminalManager.CreateSSHSession("", config)
 }
 

@@ -26,9 +26,13 @@ export function GetFromKeychain(arg1:string):Promise<string>;
 
 export function GetGuestConfigPath():Promise<string>;
 
+export function GetGuestSnippetsPath():Promise<string>;
+
 export function GetTerminalMetadata(arg1:string):Promise<terminal.SessionMetadata>;
 
 export function GetUserConfigPath(arg1:string):Promise<string>;
+
+export function GetUserSnippetsPath(arg1:string):Promise<string>;
 
 export function Greet(arg1:string):Promise<string>;
 

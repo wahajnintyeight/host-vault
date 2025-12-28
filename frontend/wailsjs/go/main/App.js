@@ -50,12 +50,20 @@ export function GetGuestConfigPath() {
   return window['go']['main']['App']['GetGuestConfigPath']();
 }
 
+export function GetGuestSnippetsPath() {
+  return window['go']['main']['App']['GetGuestSnippetsPath']();
+}
+
 export function GetTerminalMetadata(arg1) {
   return window['go']['main']['App']['GetTerminalMetadata'](arg1);
 }
 
 export function GetUserConfigPath(arg1) {
   return window['go']['main']['App']['GetUserConfigPath'](arg1);
+}
+
+export function GetUserSnippetsPath(arg1) {
+  return window['go']['main']['App']['GetUserSnippetsPath'](arg1);
 }
 
 export function Greet(arg1) {

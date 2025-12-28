@@ -7,6 +7,7 @@ import { SetupPage } from './pages/SetupPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { ConnectionsPage } from './pages/ConnectionsPage';
+import { CommandsPage } from './pages/CommandsPage';
 import { ROUTES } from './lib/constants';
 import { useAuthStore } from './store/authStore';
 import { useUserConfigStore } from './store/userConfigStore';
@@ -93,10 +94,7 @@ function App() {
             element={
               <ProtectedRoute requireMasterPassword>
                 <MainLayout>
-                  <div className="p-6">
-                    <h1 className="text-2xl font-bold text-text-primary mb-4">Commands</h1>
-                    <p className="text-text-secondary">Command management coming soon...</p>
-                  </div>
+                  <CommandsPage />
                 </MainLayout>
               </ProtectedRoute>
             }
