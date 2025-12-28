@@ -109,6 +109,7 @@ export const TabBar: React.FC<TabBarProps> = ({
                 <div key={tab.id} className="group h-full">
                   <Tab
                     tab={tab}
+                    sessionType={getSessionType?.(tab.sessionId)}
                     isActive={tab.id === activeTabId}
                     tabIndex={index}
                     tabCount={tabs.length}

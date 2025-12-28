@@ -7,6 +7,7 @@ import { TerminalOutputEvent, TerminalClosedEvent } from '../../types/terminal';
 import { WriteToTerminal, ResizeTerminal } from '../../../wailsjs/go/main/App';
 import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime';
 import { getTerminalThemeFromCSS } from '../../lib/terminalTheme';
+import { useUserConfigStore } from '../../store/userConfigStore';
 
 interface TerminalProps {
   sessionId: string;
@@ -22,7 +23,7 @@ const DEFAULT_FONT_SIZE = 14;
  * Terminal component that wraps xterm.js and integrates with the Wails backend.
  * 
  * Features:
- * - Theme-aware styling that matches the app theme
+ * - Theme-aware styling that matches the app theme (updates on theme change)
  * - Zoom in/out with Ctrl++ / Ctrl+- / Ctrl+0
  * - Auto-fit on resize with debouncing
  * - Web links support
@@ -35,12 +36,27 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, onClose }) => {
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
+  
+  // Get current theme from store to react to changes
+  const { config } = useUserConfigStore();
+
+  // Update terminal theme when app theme changes
+  useEffect(() => {
+    if (xtermRef.current) {
+      // Small delay to ensure CSS variables are updated
+      setTimeout(() => {
+        const newTheme = getTerminalThemeFromCSS();
+        xtermRef.current!.options.theme = newTheme;
+        // Force a refresh by writing an empty string
+        xtermRef.current!.refresh(0, xtermRef.current!.rows - 1);
+      }, 100);
+    }
+  }, [config.theme]);
 
   // Handle zoom keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle when terminal container is focused or contains focus
-      if (!terminalRef.current?.contains(document.activeElement) && 
+      if (!terminalRef.current?.contains(document.activeElement) &&
           document.activeElement !== terminalRef.current) {
         return;
       }
@@ -75,8 +91,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, onClose }) => {
   useEffect(() => {
     if (xtermRef.current && fitAddonRef.current) {
       xtermRef.current.options.fontSize = fontSize;
-      
-      // Re-fit after font size change
+
       setTimeout(() => {
         if (fitAddonRef.current && xtermRef.current) {
           fitAddonRef.current.fit();

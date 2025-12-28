@@ -119,7 +119,7 @@ export const Header: React.FC = () => {
           </button>
         </div>
 
-        {/* App title - always visible but compact when tabs exist */}
+        {/* App title - always visible but compact when tabs exist
         <div
           className="flex items-center gap-2 flex-shrink-0 titlebar"
           onDoubleClick={handleDoubleClick}
@@ -130,7 +130,7 @@ export const Header: React.FC = () => {
           >
             Host Vault
           </span>
-        </div>
+        </div> */}
 
         {/* Separator */}
         <div className="h-5 w-px bg-border/50 flex-shrink-0" />

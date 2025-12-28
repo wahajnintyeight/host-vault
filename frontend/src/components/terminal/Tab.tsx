@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { X } from 'lucide-react';
-import { TerminalTab, TabAction } from '../../types/terminal';
+import { Terminal, Server, X } from 'lucide-react';
+import { TerminalTab, SessionType, TabAction } from '../../types/terminal';
 import { TerminalContextMenu } from './TerminalContextMenu';
 
 interface TabProps {
   tab: TerminalTab;
+  sessionType?: SessionType;
   isActive: boolean;
   tabIndex: number;
   tabCount: number;
@@ -20,11 +21,12 @@ interface TabProps {
 }
 
 /**
- * Individual draggable tab component for terminal sessions
+ * Clean, minimal terminal tab component with drag support
  * Uses theme CSS variables for consistent styling
  */
 export const Tab: React.FC<TabProps> = ({
   tab,
+  sessionType = SessionType.Local,
   isActive,
   tabIndex,
   tabCount,
@@ -122,6 +124,14 @@ export const Tab: React.FC<TabProps> = ({
     setContextMenu(null);
   };
 
+  // Get icon based on session type
+  const getIcon = () => {
+    if (sessionType === SessionType.SSH) {
+      return <Server className="w-3.5 h-3.5 flex-shrink-0" />;
+    }
+    return <Terminal className="w-3.5 h-3.5 flex-shrink-0" />;
+  };
+
   return (
     <>
       <div
@@ -133,12 +143,12 @@ export const Tab: React.FC<TabProps> = ({
         {...attributes}
         {...listeners}
         className={`
-          relative flex items-center gap-1.5 px-3 h-full min-w-[100px] max-w-[160px]
-          cursor-pointer transition-all duration-150 select-none
-          border-r border-border/20
+          group flex items-center gap-2 px-3 h-10 min-w-fit max-w-[180px]
+          cursor-pointer transition-all duration-200 select-none whitespace-nowrap
+          border-b-2
           ${isActive
-            ? 'bg-background text-text-primary'
-            : 'bg-transparent hover:bg-background-light/50 text-text-secondary hover:text-text-primary'
+            ? 'border-primary bg-background text-text-primary'
+            : 'border-transparent bg-transparent text-text-secondary hover:text-text-primary hover:bg-background-light/40'
           }
           ${isDragging ? 'opacity-50 scale-95' : ''}
         `}
@@ -146,19 +156,10 @@ export const Tab: React.FC<TabProps> = ({
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
       >
-        {/* Close button */}
-        <button
-          onClick={handleClose}
-          className={`
-            flex-shrink-0 p-0.5 rounded transition-all duration-150
-            hover:bg-background-lighter
-            ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}
-          `}
-          aria-label="Close tab"
-          style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}
-        >
-          <X className="w-3.5 h-3.5 text-text-muted hover:text-text-primary" />
-        </button>
+        {/* Icon */}
+        <span className={`flex-shrink-0 ${isActive ? 'text-primary' : 'text-text-muted'}`}>
+          {getIcon()}
+        </span>
 
         {/* Tab title or input */}
         {isEditing ? (
@@ -169,15 +170,29 @@ export const Tab: React.FC<TabProps> = ({
             onChange={(e) => setEditedTitle(e.target.value)}
             onBlur={handleSave}
             onKeyDown={handleKeyDown}
-            className="flex-1 min-w-0 bg-transparent text-text-primary text-xs outline-none border-b border-primary"
+            className="flex-1 min-w-0 bg-transparent text-text-primary text-sm font-medium outline-none border-b border-primary"
             onClick={(e) => e.stopPropagation()}
             style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}
           />
         ) : (
-          <span className="flex-1 min-w-0 truncate text-xs font-medium">
+          <span className="flex-1 min-w-0 truncate text-sm font-medium">
             {tab.title}
           </span>
         )}
+
+        {/* Close button */}
+        <button
+          onClick={handleClose}
+          className={`
+            ml-1 p-1 rounded transition-all duration-150 flex-shrink-0
+            opacity-0 group-hover:opacity-100
+            ${isActive ? 'hover:bg-danger/10' : 'hover:bg-background-lighter'}
+          `}
+          aria-label="Close tab"
+          style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}
+        >
+          <X className={`w-3.5 h-3.5 ${isActive ? 'text-danger hover:text-danger' : 'text-text-muted hover:text-text-primary'}`} />
+        </button>
       </div>
 
       {/* Context Menu */}
