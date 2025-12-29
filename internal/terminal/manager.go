@@ -133,6 +133,24 @@ func (tm *TerminalManager) GetSessionMetadata(sessionID string) (SessionMetadata
 	return session.GetMetadata(), nil
 }
 
+// GetSessionScrollback retrieves all scrollback history for an SSH session
+func (tm *TerminalManager) GetSessionScrollback(sessionID string) ([][]byte, error) {
+	tm.mu.RLock()
+	session, exists := tm.sessions[sessionID]
+	tm.mu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	// Only SSH sessions have scrollback
+	if sshSession, ok := session.(*SSHSession); ok {
+		return sshSession.GetScrollbackHistory(), nil
+	}
+
+	return nil, nil
+}
+
 func (tm *TerminalManager) streamOutput(session Session) {
 	sessionID := session.ID()
 	log.Printf("[TERM] Starting output stream for session %s", sessionID)
@@ -140,14 +158,10 @@ func (tm *TerminalManager) streamOutput(session Session) {
 	for {
 		data := session.ReadOutput()
 		if data == nil {
-			// Session output stream ended - mark as disconnected but don't close immediately
 			log.Printf("[TERM] Session %s output stream ended - marking as disconnected", sessionID)
 			runtime.EventsEmit(tm.ctx, "terminal:disconnected", TerminalClosedEvent{
 				SessionID: sessionID,
 			})
-
-			// Don't remove from sessions map - allow for potential reconnection
-			// The session will be properly closed when explicitly requested
 			break
 		}
 
@@ -160,9 +174,6 @@ func (tm *TerminalManager) streamOutput(session Session) {
 }
 
 func (tm *TerminalManager) IsSessionReferenced(sessionID string) bool {
-	// This would need to be called from the frontend to check if a session
-	// is still being used by any tabs/panes. For now, we'll assume sessions
-	// should be kept alive until explicitly closed.
 	return true
 }
 
@@ -182,7 +193,6 @@ func (tm *TerminalManager) ReconnectSession(sessionID string, config ConnectionC
 		return fmt.Errorf("reconnection only supported for SSH sessions")
 	}
 
-	// Cast to SSH session and attempt reconnection
 	sshSession, ok := session.(*SSHSession)
 	if !ok {
 		log.Printf("[TERM] Failed to cast session %s to SSH session", sessionID)
@@ -195,10 +205,8 @@ func (tm *TerminalManager) ReconnectSession(sessionID string, config ConnectionC
 		return fmt.Errorf("failed to reconnect session: %w", err)
 	}
 
-	// Restart the output streaming goroutine
 	go tm.streamOutput(session)
 
-	// Emit success event
 	runtime.EventsEmit(tm.ctx, "terminal:reconnected", TerminalClosedEvent{
 		SessionID: sessionID,
 	})

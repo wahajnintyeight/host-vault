@@ -19,17 +19,16 @@ const TerminalTabComponent = React.memo<TerminalTabProps>(
     const isActive = tab.id === activeTabId;
 
     return (
-      <div
-        className={`absolute inset-0 ${
-          isActive ? 'visible z-10' : 'invisible z-0'
-        }`}
-      >
-        <Terminal sessionId={tab.sessionId} onClose={handleClose} />
+      <div className="absolute inset-0">
+        <Terminal 
+          sessionId={tab.sessionId}
+          isVisible={isActive}
+          onClose={handleClose} 
+        />
       </div>
     );
   },
   (prev, next) => {
-    // Only re-render if these specific props actually changed
     return (
       prev.tab.id === next.tab.id &&
       prev.tab.sessionId === next.tab.sessionId &&
@@ -41,18 +40,6 @@ const TerminalTabComponent = React.memo<TerminalTabProps>(
 
 TerminalTabComponent.displayName = 'TerminalTabComponent';
 
-/**
- * TerminalContainer - Main orchestrator component that combines TabBar and Terminal
- * 
- * Manages terminal tabs, keyboard shortcuts, and terminal lifecycle.
- * Initializes with one default local terminal if no tabs exist.
- * 
- * Keyboard shortcuts:
- * - Ctrl+T: New tab
- * - Ctrl+W: Close active tab
- * - Ctrl+Tab: Next tab
- * - Ctrl+Shift+Tab: Previous tab
- */
 export const TerminalContainer: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -60,7 +47,6 @@ export const TerminalContainer: React.FC = () => {
     tabs,
     activeTabId,
     sessions,
-    addTab,
     removeTab,
     setActiveTab,
     updateTabTitle,
@@ -69,7 +55,6 @@ export const TerminalContainer: React.FC = () => {
     createLocalTerminal,
   } = useTerminalStore();
 
-  // Component lifecycle logging
   useEffect(() => {
     console.log('[TERM] TerminalContainer component mounted');
     return () => {
@@ -77,7 +62,6 @@ export const TerminalContainer: React.FC = () => {
     };
   }, []);
 
-  // Initialize with one default local terminal if no tabs exist
   useEffect(() => {
     if (tabs.length === 0) {
       createLocalTerminal().catch((error) => {
@@ -86,15 +70,12 @@ export const TerminalContainer: React.FC = () => {
     }
   }, [tabs.length, createLocalTerminal]);
 
-  // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle shortcuts when container is focused or contains focus
       if (!containerRef.current?.contains(document.activeElement)) {
         return;
       }
 
-      // Ctrl+T: New tab
       if (e.ctrlKey && e.key === 't') {
         e.preventDefault();
         console.log('[TERM] Keyboard shortcut: New tab (Ctrl+T)');
@@ -104,7 +85,6 @@ export const TerminalContainer: React.FC = () => {
         return;
       }
 
-      // Ctrl+W: Close active tab
       if (e.ctrlKey && e.key === 'w') {
         e.preventDefault();
         console.log('[TERM] Keyboard shortcut: Close tab (Ctrl+W)', activeTabId);
@@ -114,7 +94,6 @@ export const TerminalContainer: React.FC = () => {
         return;
       }
 
-      // Ctrl+Tab: Next tab
       if (e.ctrlKey && e.key === 'Tab' && !e.shiftKey) {
         e.preventDefault();
         if (tabs.length > 0 && activeTabId) {
@@ -126,7 +105,6 @@ export const TerminalContainer: React.FC = () => {
         return;
       }
 
-      // Ctrl+Shift+Tab: Previous tab
       if (e.ctrlKey && e.shiftKey && e.key === 'Tab') {
         e.preventDefault();
         if (tabs.length > 0 && activeTabId) {
@@ -145,13 +123,11 @@ export const TerminalContainer: React.FC = () => {
     };
   }, [tabs, activeTabId, createLocalTerminal, removeTab, setActiveTab]);
 
-  // Handle terminal close
   const handleTerminalClose = useCallback((tabId: string) => {
     console.log('[TERM] Terminal session closed for tab:', tabId);
     removeTab(tabId);
   }, [removeTab]);
 
-  // Handle tab actions
   const handleTabClose = useCallback((tabId: string) => {
     console.log('[TERM] Closing tab:', tabId);
     removeTab(tabId);
@@ -183,13 +159,11 @@ export const TerminalContainer: React.FC = () => {
     });
   }, [createLocalTerminal]);
 
-  // Close all tabs except the specified one
   const handleCloseOthers = useCallback((tabId: string) => {
     const tabsToClose = tabs.filter(t => t.id !== tabId);
     tabsToClose.forEach(t => removeTab(t.id));
   }, [tabs, removeTab]);
 
-  // Close all tabs to the right of the specified one
   const handleCloseRight = useCallback((tabId: string) => {
     const tabIndex = tabs.findIndex(t => t.id === tabId);
     if (tabIndex === -1) return;
@@ -198,12 +172,10 @@ export const TerminalContainer: React.FC = () => {
     tabsToClose.forEach(t => removeTab(t.id));
   }, [tabs, removeTab]);
 
-  // Close all tabs
   const handleCloseAll = useCallback(() => {
     tabs.forEach(t => removeTab(t.id));
   }, [tabs, removeTab]);
 
-  // Get session type for a given session ID
   const getSessionType = useCallback((sessionId: string) => {
     const session = sessions.get(sessionId);
     return session?.type;

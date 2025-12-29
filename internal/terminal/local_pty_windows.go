@@ -92,11 +92,11 @@ func (s *LocalPTYSession) readOutput() {
 				data := make([]byte, n)
 				copy(data, buf[:n])
 
-				// Use timeout to prevent blocking indefinitely
+				// Block until buffer has space - NEVER drop data
+				// The large buffer (1000) should handle temporary slowdowns
+				// If frontend is truly stuck, user will close the tab anyway
 				select {
 				case s.buffer <- data:
-				case <-time.After(1 * time.Second):
-					// Buffer full, drop data to prevent blocking
 				case <-s.done:
 					return
 				}

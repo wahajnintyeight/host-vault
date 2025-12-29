@@ -4,19 +4,39 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
-import { TerminalOutputEvent, TerminalClosedEvent, TerminalDisconnectedEvent, TerminalReconnectNeededEvent } from '../../types/terminal';
+import {
+  TerminalOutputEvent,
+  TerminalClosedEvent,
+  TerminalDisconnectedEvent,
+  TerminalReconnectNeededEvent,
+} from '../../types/terminal';
 import { WriteToTerminal, ResizeTerminal } from '../../../wailsjs/go/main/App';
 import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime';
 import { getTerminalThemeFromCSS } from '../../lib/terminalTheme';
 import { useUserConfigStore } from '../../store/userConfigStore';
 
-// Check if Wails bindings are available
 const isWailsAvailable = (): boolean => {
   return typeof window !== 'undefined' && window.go?.main?.App;
 };
 
+// Global terminal instance cache with their DOM containers
+interface TerminalInstance {
+  term: XTerm;
+  fitAddon: FitAddon;
+  searchAddon: SearchAddon;
+  container: HTMLDivElement; // The actual DOM element containing the terminal
+  outputBuffer: string[];
+  isConsuming: boolean;
+  inputDisposable: { dispose: () => void } | null;
+  resizeObserver: ResizeObserver | null;
+  resizeTimeout: NodeJS.Timeout | null;
+}
+
+const terminalInstances = new Map<string, TerminalInstance>();
+
 interface TerminalProps {
   sessionId: string;
+  isVisible?: boolean;
   onClose?: () => void;
 }
 
@@ -28,30 +48,27 @@ export interface TerminalHandle {
   writeCommand: (command: string) => void;
 }
 
-// Font size constraints
 const MIN_FONT_SIZE = 8;
 const MAX_FONT_SIZE = 32;
 const DEFAULT_FONT_SIZE = 14;
 
-/**
- * Terminal component that wraps xterm.js and integrates with the Wails backend.
- */
-const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, onClose }, ref) => {
-  const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<XTerm | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const searchAddonRef = useRef<SearchAddon | null>(null);
-  const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, isVisible = true, onClose }, ref) => {
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   const { config } = useUserConfigStore();
 
-  // Expose search methods to parent
+  const getInstance = (): TerminalInstance | null => {
+    return terminalInstances.get(sessionId) || null;
+  };
+
   useImperativeHandle(ref, () => ({
     search: (query: string) => {
-      if (searchAddonRef.current && query) {
-        return searchAddonRef.current.findNext(query, {
+      const instance = getInstance();
+      if (instance?.searchAddon && query) {
+        return instance.searchAddon.findNext(query, {
           caseSensitive: false,
           regex: false,
           decorations: {
@@ -67,8 +84,9 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, onClose
       return false;
     },
     searchNext: (query: string) => {
-      if (searchAddonRef.current && query) {
-        return searchAddonRef.current.findNext(query, {
+      const instance = getInstance();
+      if (instance?.searchAddon && query) {
+        return instance.searchAddon.findNext(query, {
           caseSensitive: false,
           regex: false,
           decorations: {
@@ -84,8 +102,9 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, onClose
       return false;
     },
     searchPrevious: (query: string) => {
-      if (searchAddonRef.current && query) {
-        return searchAddonRef.current.findPrevious(query, {
+      const instance = getInstance();
+      if (instance?.searchAddon && query) {
+        return instance.searchAddon.findPrevious(query, {
           caseSensitive: false,
           regex: false,
           decorations: {
@@ -101,7 +120,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, onClose
       return false;
     },
     clearSearch: () => {
-      searchAddonRef.current?.clearDecorations();
+      getInstance()?.searchAddon?.clearDecorations();
     },
     writeCommand: (command: string) => {
       if (sessionId && isWailsAvailable()) {
@@ -112,20 +131,21 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, onClose
 
   // Update terminal theme when app theme changes
   useEffect(() => {
-    if (xtermRef.current) {
+    const instance = getInstance();
+    if (instance?.term) {
       setTimeout(() => {
         const newTheme = getTerminalThemeFromCSS();
-        xtermRef.current!.options.theme = newTheme;
-        xtermRef.current!.refresh(0, xtermRef.current!.rows - 1);
+        instance.term.options.theme = newTheme;
+        instance.term.refresh(0, instance.term.rows - 1);
       }, 100);
     }
-  }, [config.theme]);
+  }, [config.theme, sessionId]);
 
   // Handle zoom keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!terminalRef.current?.contains(document.activeElement) &&
-          document.activeElement !== terminalRef.current) {
+      const instance = getInstance();
+      if (!instance?.container.contains(document.activeElement)) {
         return;
       }
 
@@ -150,19 +170,19 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, onClose
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [sessionId]);
 
-  // Update terminal font size when it changes
+  // Update terminal font size
   useEffect(() => {
-    if (xtermRef.current && fitAddonRef.current) {
-      xtermRef.current.options.fontSize = fontSize;
-
+    const instance = getInstance();
+    if (instance?.term && instance?.fitAddon) {
+      instance.term.options.fontSize = fontSize;
       setTimeout(() => {
-        if (fitAddonRef.current && xtermRef.current) {
-          fitAddonRef.current.fit();
-          const cols = xtermRef.current.cols;
-          const rows = xtermRef.current.rows;
-          if (isWailsAvailable()) {
+        if (instance.fitAddon && instance.term) {
+          instance.fitAddon.fit();
+          const cols = instance.term.cols;
+          const rows = instance.term.rows;
+          if (cols > 2 && rows > 2 && isWailsAvailable()) {
             ResizeTerminal(sessionId, cols, rows).catch(console.error);
           }
         }
@@ -170,9 +190,66 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, onClose
     }
   }, [fontSize, sessionId]);
 
+  // Handle visibility changes
   useEffect(() => {
-    console.log('[TERM] Terminal component mounted for session:', sessionId);
-    if (!terminalRef.current) return;
+    const instance = getInstance();
+    if (!instance) return;
+
+    console.log(`[TERM] Visibility changed for ${sessionId}: ${isVisible}, buffer: ${instance.outputBuffer.length}`);
+
+    if (isVisible && instance.outputBuffer.length > 0) {
+      console.log(`[TERM] Replaying ${instance.outputBuffer.length} buffered chunks`);
+      for (const data of instance.outputBuffer) {
+        instance.term.write(data);
+      }
+      instance.outputBuffer = [];
+    }
+
+    instance.isConsuming = isVisible;
+
+    // Refit when becoming visible
+    if (isVisible && instance.fitAddon) {
+      setTimeout(() => {
+        instance.fitAddon.fit();
+      }, 50);
+    }
+  }, [isVisible, sessionId]);
+
+  // Main effect: create or attach terminal
+  useEffect(() => {
+    if (!wrapperRef.current) return;
+
+    let instance = terminalInstances.get(sessionId);
+
+    if (instance) {
+      // Reuse existing instance - just move the container into our wrapper
+      console.log(`[TERM] Reattaching existing terminal for session: ${sessionId}`);
+      wrapperRef.current.appendChild(instance.container);
+      instance.isConsuming = isVisible;
+      
+      // Refit after reattachment
+      setTimeout(() => {
+        if (instance && instance.fitAddon) {
+          instance.fitAddon.fit();
+        }
+      }, 50);
+      
+      return () => {
+        // On cleanup, move container to a hidden holder (not destroy it)
+        if (instance && instance.container.parentNode) {
+          instance.container.parentNode.removeChild(instance.container);
+        }
+      };
+    }
+
+    // Create new terminal instance
+    console.log(`[TERM] Creating NEW terminal for session: ${sessionId}`);
+
+    // Create a container div that will hold the terminal
+    const container = document.createElement('div');
+    container.className = 'w-full h-full';
+    container.style.cssText = 'width: 100%; height: 100%;';
+    wrapperRef.current.appendChild(container);
 
     const theme = getTerminalThemeFromCSS();
 
@@ -196,122 +273,135 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, onClose
     term.loadAddon(webLinksAddon);
     term.loadAddon(searchAddon);
 
-    term.open(terminalRef.current);
-    fitAddon.fit();
+    term.open(container);
 
-    xtermRef.current = term;
-    fitAddonRef.current = fitAddon;
-    searchAddonRef.current = searchAddon;
+    // Wait a frame then fit
+    requestAnimationFrame(() => {
+      fitAddon.fit();
+      const cols = term.cols;
+      const rows = term.rows;
+      if (cols > 2 && rows > 2 && isWailsAvailable()) {
+        ResizeTerminal(sessionId, cols, rows).catch(console.error);
+      }
+    });
 
-    xtermRef.current = term;
+    const newInstance: TerminalInstance = {
+      term,
+      fitAddon,
+      searchAddon,
+      container,
+      outputBuffer: [],
+      isConsuming: isVisible,
+      inputDisposable: null,
+      resizeObserver: null,
+      resizeTimeout: null,
+    };
 
-        const cols = term.cols;
-        const rows = term.rows;
-        if (isWailsAvailable()) {
-          ResizeTerminal(sessionId, cols, rows).catch(console.error);
-        }
-
-    const inputDisposable = term.onData((data) => {
+    // Input handler
+    newInstance.inputDisposable = term.onData((data) => {
       if (isWailsAvailable()) {
         WriteToTerminal(sessionId, data).catch(console.error);
       }
     });
 
+    // Event handlers
     EventsOn('terminal:output', (event: TerminalOutputEvent) => {
-      if (event.SessionID === sessionId && xtermRef.current) {
-        xtermRef.current.write(event.Data);
+      if (event.SessionID === sessionId) {
+        const inst = terminalInstances.get(sessionId);
+        if (inst) {
+          if (inst.isConsuming) {
+            inst.term.write(event.Data);
+          } else {
+            inst.outputBuffer.push(event.Data);
+            if (inst.outputBuffer.length > 10000) {
+              inst.outputBuffer = inst.outputBuffer.slice(-5000);
+            }
+          }
+        }
       }
     });
 
     EventsOn('terminal:closed', (event: TerminalClosedEvent) => {
       if (event.SessionID === sessionId) {
-        onClose?.();
+        onCloseRef.current?.();
       }
     });
 
     EventsOn('terminal:disconnected', (event: TerminalDisconnectedEvent) => {
       if (event.SessionID === sessionId) {
-        console.log('[TERM] Session disconnected:', sessionId);
-        // Mark session as disconnected but don't close the terminal
-        // The terminal will show a disconnection message but remain usable
-        if (xtermRef.current) {
-          xtermRef.current.write('\r\n\x1b[31m[DISCONNECTED] Connection lost. Terminal will attempt to reconnect...\x1b[0m\r\n');
+        const inst = terminalInstances.get(sessionId);
+        const msg = '\r\n\x1b[31m[DISCONNECTED] Connection lost.\x1b[0m\r\n';
+        if (inst) {
+          if (inst.isConsuming) inst.term.write(msg);
+          else inst.outputBuffer.push(msg);
         }
       }
     });
 
     EventsOn('terminal:reconnect-needed', (event: TerminalReconnectNeededEvent) => {
       if (event.SessionID === sessionId) {
-        console.log('[TERM] Reconnection needed for session:', sessionId);
-        // Show reconnection prompt
-        if (xtermRef.current) {
-          xtermRef.current.write('\r\n\x1b[33m[RECONNECT] Use the reconnect button in the tab to restore connection.\x1b[0m\r\n');
+        const inst = terminalInstances.get(sessionId);
+        const msg = '\r\n\x1b[33m[RECONNECT] Use reconnect button to restore.\x1b[0m\r\n';
+        if (inst) {
+          if (inst.isConsuming) inst.term.write(msg);
+          else inst.outputBuffer.push(msg);
         }
       }
     });
 
     EventsOn('terminal:reconnected', (event: TerminalClosedEvent) => {
       if (event.SessionID === sessionId) {
-        console.log('[TERM] Session reconnected:', sessionId);
-        // Show successful reconnection message
-        if (xtermRef.current) {
-          xtermRef.current.write('\r\n\x1b[32m[RECONNECTED] Connection restored successfully.\x1b[0m\r\n');
+        const inst = terminalInstances.get(sessionId);
+        const msg = '\r\n\x1b[32m[RECONNECTED] Connection restored.\x1b[0m\r\n';
+        if (inst) {
+          if (inst.isConsuming) inst.term.write(msg);
+          else inst.outputBuffer.push(msg);
         }
       }
     });
 
+    // Resize observer
     const handleResize = () => {
-      if (resizeTimeoutRef.current) {
-        clearTimeout(resizeTimeoutRef.current);
-      }
+      const inst = terminalInstances.get(sessionId);
+      if (!inst) return;
 
-      resizeTimeoutRef.current = setTimeout(() => {
-        if (fitAddonRef.current && xtermRef.current) {
-          try {
-            fitAddonRef.current.fit();
-            const cols = xtermRef.current.cols;
-            const rows = xtermRef.current.rows;
-            if (isWailsAvailable()) {
-              ResizeTerminal(sessionId, cols, rows).catch(console.error);
-            }
-          } catch (error) {
-            console.error('Failed to fit terminal:', error);
+      if (inst.resizeTimeout) clearTimeout(inst.resizeTimeout);
+
+      inst.resizeTimeout = setTimeout(() => {
+        if (!inst.container.parentElement) return;
+        const parent = inst.container.parentElement;
+        if (parent.clientWidth === 0 || parent.clientHeight === 0) return;
+
+        try {
+          inst.fitAddon.fit();
+          const cols = inst.term.cols;
+          const rows = inst.term.rows;
+          if (cols > 2 && rows > 2 && isWailsAvailable()) {
+            ResizeTerminal(sessionId, cols, rows).catch(console.error);
           }
+        } catch (e) {
+          console.error('Resize error:', e);
         }
       }, 100);
     };
 
-    if (terminalRef.current) {
-      resizeObserverRef.current = new ResizeObserver(handleResize);
-      resizeObserverRef.current.observe(terminalRef.current);
-    }
+    newInstance.resizeObserver = new ResizeObserver(handleResize);
+    newInstance.resizeObserver.observe(container);
+
+    terminalInstances.set(sessionId, newInstance);
 
     return () => {
-      console.log('[TERM] Terminal component unmounting for session:', sessionId);
-      console.log('[TERM] Terminal component resize observer for session:', resizeObserverRef.current);
-      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current);
-      if (resizeObserverRef.current) {
-        resizeObserverRef.current.disconnect();
-        resizeObserverRef.current = null;
+      // On cleanup, just detach the container (don't destroy)
+      console.log(`[TERM] Detaching terminal for session: ${sessionId}`);
+      if (container.parentNode) {
+        container.parentNode.removeChild(container);
       }
-      inputDisposable.dispose();
-      EventsOff('terminal:output');
-      EventsOff('terminal:closed');
-      EventsOff('terminal:disconnected');
-      EventsOff('terminal:reconnect-needed');
-      EventsOff('terminal:reconnected');
-      if (xtermRef.current) {
-        xtermRef.current.dispose();
-        xtermRef.current = null;
-      }
-      fitAddonRef.current = null;
-      searchAddonRef.current = null;
     };
   }, [sessionId]);
 
   return (
     <div
-      ref={terminalRef}
+      ref={wrapperRef}
       className="w-full h-full overflow-hidden bg-background p-2"
       tabIndex={0}
     />
@@ -319,5 +409,30 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, onClose
 });
 
 Terminal.displayName = 'Terminal';
+
+// Destroy terminal instance completely (call when tab is closed)
+export const destroyTerminalInstance = (sessionId: string) => {
+  const instance = terminalInstances.get(sessionId);
+  if (instance) {
+    console.log(`[TERM] Destroying terminal for session: ${sessionId}`);
+    
+    if (instance.resizeTimeout) clearTimeout(instance.resizeTimeout);
+    if (instance.resizeObserver) instance.resizeObserver.disconnect();
+    if (instance.inputDisposable) instance.inputDisposable.dispose();
+    
+    EventsOff('terminal:output');
+    EventsOff('terminal:closed');
+    EventsOff('terminal:disconnected');
+    EventsOff('terminal:reconnect-needed');
+    EventsOff('terminal:reconnected');
+    
+    instance.term.dispose();
+    if (instance.container.parentNode) {
+      instance.container.parentNode.removeChild(instance.container);
+    }
+    
+    terminalInstances.delete(sessionId);
+  }
+};
 
 export default React.memo(Terminal);

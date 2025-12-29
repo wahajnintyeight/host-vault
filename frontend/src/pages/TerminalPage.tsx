@@ -1,15 +1,76 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useTerminalStore } from '../store/terminalStore';
 import Terminal, { TerminalHandle } from '../components/terminal/Terminal';
 import { TerminalDrawer } from '../components/terminal/TerminalDrawer';
 import { PanelRightOpen, PanelRightClose, Server } from 'lucide-react';
 
 /**
+ * Memoized terminal wrapper to prevent re-renders when switching tabs
+ * Only re-renders when isActive or isDrawerOpen changes for THIS terminal
+ */
+interface TerminalWrapperProps {
+  sessionId: string;
+  isActive: boolean;
+  isDrawerOpen: boolean;
+  onTerminalRef: (sessionId: string, handle: TerminalHandle | null) => void;
+}
+
+const TerminalWrapper = memo<TerminalWrapperProps>(({ sessionId, isActive, isDrawerOpen, onTerminalRef }) => {
+  // Get store actions directly - these are stable references
+  const store = useTerminalStore;
+
+  const handleClose = useCallback(() => {
+    const state = store.getState();
+    const tab = state.tabs.find((t) => t.sessionId === sessionId);
+    if (tab) state.removeTab(tab.id);
+  }, [sessionId]);
+
+  const handleRef = useCallback((handle: TerminalHandle | null) => {
+    onTerminalRef(sessionId, handle);
+  }, [sessionId, onTerminalRef]);
+
+  return (
+    <div
+      className="absolute inset-0"
+      style={{
+        visibility: isActive ? 'visible' : 'hidden',
+        pointerEvents: isActive ? 'auto' : 'none',
+        right: isDrawerOpen ? '288px' : '0px',
+        transition: 'right 0.2s ease-in-out'
+      }}
+    >
+      <Terminal
+        ref={handleRef}
+        sessionId={sessionId}
+        isVisible={isActive}
+        onClose={handleClose}
+      />
+    </div>
+  );
+}, (prevProps, nextProps) => {
+  // Custom comparison - only re-render if these specific props change
+  return (
+    prevProps.sessionId === nextProps.sessionId &&
+    prevProps.isActive === nextProps.isActive &&
+    prevProps.isDrawerOpen === nextProps.isDrawerOpen
+  );
+});
+
+TerminalWrapper.displayName = 'TerminalWrapper';
+
+/**
  * TerminalPage - Terminal content area with sidebar drawer
  * Renders all terminal instances but hides inactive ones to preserve scrollback buffer
  */
 export const TerminalPage: React.FC = () => {
-  const { tabs, activeTabId, removeTab, connectingSessionId, createLocalTerminal, sessions } = useTerminalStore();
+  // Use shallow selectors to prevent unnecessary re-renders
+  const tabs = useTerminalStore((state) => state.tabs);
+  const activeTabId = useTerminalStore((state) => state.activeTabId);
+  const connectingSessionId = useTerminalStore((state) => state.connectingSessionId);
+  const createLocalTerminal = useTerminalStore((state) => state.createLocalTerminal);
+  // Get session IDs as a stable array - only changes when sessions are added/removed
+  const sessionIds = useTerminalStore((state) => Array.from(state.sessions.keys()));
+  
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
@@ -17,11 +78,11 @@ export const TerminalPage: React.FC = () => {
   const activeSessionId = activeTab?.sessionId;
   const isConnecting = !!connectingSessionId;
 
-  // Get all session IDs from the sessions store
-  const allSessionIds = Array.from(sessions.keys());
+  // Memoize session IDs to prevent re-renders when the array content hasn't changed
+  const allSessionIds = useMemo(() => sessionIds, [sessionIds.join(',')]);
 
-  // Callback ref to store terminal handles
-  const setTerminalRef = useCallback((sessionId: string, handle: TerminalHandle | null) => {
+  // Stable callback ref handler
+  const handleTerminalRef = useCallback((sessionId: string, handle: TerminalHandle | null) => {
     if (handle) {
       terminalRefs.current.set(sessionId, handle);
     } else {
@@ -83,26 +144,15 @@ export const TerminalPage: React.FC = () => {
           </div>
         )}
 
-        {/* Render ALL terminal instances, hide inactive ones to preserve scrollback */}
+        {/* Render ALL terminal instances, hide inactive ones with visibility to preserve scrollback */}
         {allSessionIds.map((sessionId) => (
-          <div
+          <TerminalWrapper
             key={sessionId}
-            className="absolute inset-0"
-            style={{
-              display: sessionId === activeSessionId && !isConnecting ? 'block' : 'none',
-              right: isDrawerOpen ? '288px' : '0px', // 288px = w-72 (18rem = 288px)
-              transition: 'right 0.2s ease-in-out'
-            }}
-          >
-            <Terminal
-              ref={(handle) => setTerminalRef(sessionId, handle)}
-              sessionId={sessionId}
-              onClose={() => {
-                const tab = tabs.find((t) => t.sessionId === sessionId);
-                if (tab) removeTab(tab.id);
-              }}
-            />
-          </div>
+            sessionId={sessionId}
+            isActive={sessionId === activeSessionId && !isConnecting}
+            isDrawerOpen={isDrawerOpen}
+            onTerminalRef={handleTerminalRef}
+          />
         ))}
 
         {/* Fallback empty state (should rarely be seen due to auto-initialization) */}

@@ -18,6 +18,7 @@ import {
   GetTerminalMetadata,
   ReconnectTerminal,
 } from '../../wailsjs/go/main/App';
+import { destroyTerminalInstance } from '../components/terminal/Terminal';
 
 // Check if Wails bindings are available
 const isWailsAvailable = (): boolean => {
@@ -129,8 +130,8 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     console.log('[TERM] Removing tab:', tabId, 'session:', tab.sessionId);
     const newTabs = state.tabs.filter(t => t.id !== tabId);
 
-    // Don't automatically close sessions - let them persist for reconnection
-    // Sessions will be closed when the app shuts down or when explicitly requested
+    // Destroy the terminal instance when tab is closed
+    destroyTerminalInstance(tab.sessionId);
 
     // Update active tab if needed
     let newActiveTabId = state.activeTabId;
