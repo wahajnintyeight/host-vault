@@ -57,8 +57,11 @@ function registerGlobalEvents() {
   });
 
   EventsOn('terminal:closed', (event: TerminalClosedEvent) => {
+    console.log('[TERM] Received terminal:closed event for session:', event.SessionID);
     const inst = terminalInstances.get(event.SessionID);
+    console.log('[TERM] Found instance:', !!inst, 'has onClose:', !!inst?.onClose);
     if (inst?.onClose) {
+      console.log('[TERM] Calling onClose for session:', event.SessionID);
       inst.onClose();
     }
   });

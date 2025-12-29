@@ -17,6 +17,14 @@ export interface SessionMetadata {
   connectionID?: string;
   createdAt: string;
   state: SessionState;
+  // SSH connection info for duplication/reconnection
+  sshConfig?: {
+    host: string;
+    port: number;
+    username: string;
+    password: string;
+    privateKey?: string;
+  };
 }
 
 export interface TerminalSession {

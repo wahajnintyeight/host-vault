@@ -175,27 +175,47 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     const tab = state.tabs.find(t => t.id === tabId);
     if (!tab) return;
 
+    const originalSession = state.sessions.get(tab.sessionId);
+    if (!originalSession) return;
+
     try {
-      const newSessionId = await DuplicateTerminal(tab.sessionId);
-      const originalSession = state.sessions.get(tab.sessionId);
-      
-      if (!originalSession) return;
+      if (originalSession.type === SessionType.SSH) {
+        // For SSH, create a new connection with the same credentials
+        const sshConfig = originalSession.metadata.sshConfig;
+        if (!sshConfig) {
+          console.error('SSH config not found for session, cannot duplicate');
+          return;
+        }
+        
+        // Use createSSHTerminal which handles the connecting overlay
+        await get().createSSHTerminal(
+          sshConfig.host,
+          sshConfig.port,
+          sshConfig.username,
+          sshConfig.password,
+          sshConfig.privateKey || '',
+          `${originalSession.title} (Copy)`
+        );
+      } else {
+        // For local terminals, use the backend duplicate
+        const newSessionId = await DuplicateTerminal(tab.sessionId);
 
-      const newSession: TerminalSession = {
-        ...originalSession,
-        id: newSessionId,
-        metadata: { ...originalSession.metadata, state: SessionState.Active },
-      };
+        const newSession: TerminalSession = {
+          ...originalSession,
+          id: newSessionId,
+          metadata: { ...originalSession.metadata, state: SessionState.Active },
+        };
 
-      get().addSession(newSession);
+        get().addSession(newSession);
 
-      const newTab: TerminalTab = {
-        id: uuid(),
-        sessionId: newSessionId,
-        title: `${originalSession.title} (Copy)`,
-      };
+        const newTab: TerminalTab = {
+          id: uuid(),
+          sessionId: newSessionId,
+          title: `${originalSession.title} (Copy)`,
+        };
 
-      get().addTab(newTab);
+        get().addTab(newTab);
+      }
     } catch (error) {
       console.error('Failed to duplicate terminal:', error);
     }
@@ -276,6 +296,14 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
           environment: {},
           createdAt: new Date().toISOString(),
           state: SessionState.Active,
+          // Store SSH config for duplication/reconnection
+          sshConfig: {
+            host,
+            port,
+            username,
+            password,
+            privateKey: privateKey || undefined,
+          },
         },
         title: name || `SSH: ${username}@${host}`,
       };

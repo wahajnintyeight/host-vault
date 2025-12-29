@@ -5,3 +5,4 @@ frontend/package-lock.json
 package-lock.json
 go.sum
 *.exe
+.verdent/*

@@ -158,8 +158,20 @@ func (tm *TerminalManager) streamOutput(session Session) {
 	for {
 		data := session.ReadOutput()
 		if data == nil {
-			log.Printf("[TERM] Session %s output stream ended - marking as disconnected", sessionID)
-			runtime.EventsEmit(tm.ctx, "terminal:disconnected", TerminalClosedEvent{
+			log.Printf("[TERM] Session %s output stream ended - will emit terminal:closed", sessionID)
+
+			// Clean up the session from our map
+			tm.mu.Lock()
+			_, exists := tm.sessions[sessionID]
+			if exists {
+				delete(tm.sessions, sessionID)
+				log.Printf("[TERM] Removed session %s from sessions map", sessionID)
+			}
+			tm.mu.Unlock()
+
+			// Emit closed event so frontend can close the tab
+			log.Printf("[TERM] Emitting terminal:closed for session %s", sessionID)
+			runtime.EventsEmit(tm.ctx, "terminal:closed", TerminalClosedEvent{
 				SessionID: sessionID,
 			})
 			break
