@@ -179,6 +179,14 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     if (!originalSession) return;
 
     try {
+      // Count existing duplicates to generate next number
+      const baseTitle = originalSession.title.replace(/ #\d+$/, ''); // Remove existing number if any
+      const duplicateCount = state.tabs.filter(t => {
+        const session = state.sessions.get(t.sessionId);
+        return session?.title.startsWith(baseTitle);
+      }).length;
+      const newTitle = `${baseTitle} #${duplicateCount + 1}`;
+
       if (originalSession.type === SessionType.SSH) {
         // For SSH, create a new connection with the same credentials
         const sshConfig = originalSession.metadata.sshConfig;
@@ -194,7 +202,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
           sshConfig.username,
           sshConfig.password,
           sshConfig.privateKey || '',
-          `${originalSession.title} (Copy)`
+          newTitle
         );
       } else {
         // For local terminals, use the backend duplicate
@@ -211,7 +219,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         const newTab: TerminalTab = {
           id: uuid(),
           sessionId: newSessionId,
-          title: `${originalSession.title} (Copy)`,
+          title: newTitle,
         };
 
         get().addTab(newTab);
