@@ -22,7 +22,7 @@ export function getTerminalThemeFromCSS(): ITheme {
 
   return {
     background: rgbaToHex(bgColor),
-    foreground: primaryColor, // Use primary color as main text for theme integration
+    foreground: textMuted, // Use primary color as main text for theme integration
     cursor: primaryColor,
     cursorAccent: rgbaToHex(bgColor),
     selectionBackground: `${primaryColor}40`,
