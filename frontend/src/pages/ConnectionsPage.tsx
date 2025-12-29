@@ -15,12 +15,15 @@ import {
   Key,
   Lock,
   Terminal,
+  Zap,
 } from 'lucide-react';
 import { useConnectionStore } from '../store/connectionStore';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '../lib/constants';
 import { useTerminalStore } from '../store/terminalStore';
 import { ConnectionModal, ConnectionFormData } from '../components/connections/ConnectionModal';
+import { QuickConnectModal } from '../components/connections/QuickConnectModal';
+import { PasswordPromptModal } from '../components/connections/PasswordPromptModal';
 import type { SSHConnection } from '../types';
 import { encryptPassword, encryptPrivateKey, decryptPassword, decryptPrivateKey } from '../lib/encryption/crypto';
 import { useAuthStore } from '../store/authStore';
@@ -43,6 +46,14 @@ export const ConnectionsPage: React.FC = () => {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<SSHConnection | null>(null);
+  const [showQuickConnect, setShowQuickConnect] = useState(false);
+  const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [pendingConnection, setPendingConnection] = useState<{
+    username: string;
+    host: string;
+    port: number;
+  } | null>(null);
   const [connectingState, setConnectingState] = useState<{
     connectionId: string | null;
     error: string | null;
@@ -270,6 +281,57 @@ export const ConnectionsPage: React.FC = () => {
     }
   };
 
+  const handleQuickConnect = (username: string, host: string, port: number) => {
+    setPendingConnection({ username, host, port });
+    setIsConnecting(true);
+    
+    createSSHTerminal(host, port, username, '', '')
+      .then(() => {
+        setIsConnecting(false);
+        setShowQuickConnect(false);
+        setPendingConnection(null);
+        setShowPasswordPrompt(false);
+        navigate(ROUTES.TERMINAL);
+      })
+      .catch((error: any) => {
+        // Check if error indicates password is needed
+        if (error?.message?.includes('permission denied') || error?.message?.includes('auth')) {
+          setIsConnecting(false);
+          setShowQuickConnect(false);
+          setShowPasswordPrompt(true);
+        } else {
+          setIsConnecting(false);
+          setPendingConnection(null);
+          setShowQuickConnect(false);
+          setShowPasswordPrompt(false);
+          console.error('Failed to connect:', error);
+        }
+      });
+  };
+
+  const handlePasswordSubmit = (password: string) => {
+    if (!pendingConnection) return;
+    
+    setIsConnecting(true);
+    createSSHTerminal(
+      pendingConnection.host,
+      pendingConnection.port,
+      pendingConnection.username,
+      password,
+      ''
+    )
+      .then(() => {
+        setIsConnecting(false);
+        setShowPasswordPrompt(false);
+        setPendingConnection(null);
+        navigate(ROUTES.TERMINAL);
+      })
+      .catch((error) => {
+        setIsConnecting(false);
+        console.error('Failed to connect with password:', error);
+      });
+  };
+
   const handleExport = () => {
     const data = JSON.stringify({ connections }, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
@@ -332,6 +394,14 @@ export const ConnectionsPage: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowQuickConnect(true)}
+            className="flex items-center gap-2 px-3 py-2 text-sm bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition-all border border-primary/30"
+            title="Quick SSH connection"
+          >
+            <Zap className="w-4 h-4" />
+            Quick Connect
+          </button>
           <button
             onClick={handleImport}
             className="flex items-center gap-2 px-3 py-2 text-sm bg-background-lighter rounded-lg text-text-secondary hover:text-text-primary hover:bg-background transition-all"
@@ -398,7 +468,7 @@ export const ConnectionsPage: React.FC = () => {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
           {filteredConnections.map((conn) => (
             <ConnectionCard
               key={conn.id}
@@ -523,6 +593,31 @@ export const ConnectionsPage: React.FC = () => {
         onSave={handleSave}
         onClose={handleCloseModal}
       />
+
+      {/* Quick Connect Modals */}
+      <QuickConnectModal
+        isOpen={showQuickConnect}
+        isConnecting={isConnecting}
+        onConnect={handleQuickConnect}
+        onClose={() => {
+          setShowQuickConnect(false);
+          setPendingConnection(null);
+        }}
+      />
+
+      {pendingConnection && (
+        <PasswordPromptModal
+          isOpen={showPasswordPrompt}
+          isConnecting={isConnecting}
+          host={pendingConnection.host}
+          username={pendingConnection.username}
+          onSubmit={handlePasswordSubmit}
+          onCancel={() => {
+            setShowPasswordPrompt(false);
+            setPendingConnection(null);
+          }}
+        />
+      )}
     </div>
   );
 };
@@ -548,6 +643,7 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
   formatDate,
 }) => {
   const [showCopied, setShowCopied] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -561,108 +657,202 @@ const ConnectionCard: React.FC<ConnectionCardProps> = ({
     return <Lock className="w-3 h-3" />;
   };
 
+  // Get color based on port for visual variety
+  const getPortColor = () => {
+    const portNum = connection.port;
+    if (portNum === 22) return 'from-primary/20 to-primary/10 border-primary/30';
+    if (portNum === 2222) return 'from-secondary/20 to-secondary/10 border-secondary/30';
+    if (portNum > 3000) return 'from-success/20 to-success/10 border-success/30';
+    return 'from-warning/20 to-warning/10 border-warning/30';
+  };
+
+  const getPortBadgeColor = () => {
+    const portNum = connection.port;
+    if (portNum === 22) return 'bg-primary/20 text-primary border border-primary/30';
+    if (portNum === 2222) return 'bg-secondary/20 text-secondary border border-secondary/30';
+    if (portNum > 3000) return 'bg-success/20 text-success border border-success/30';
+    return 'bg-warning/20 text-warning border border-warning/30';
+  };
+
+  const getAuthBadgeColor = () => {
+    if (connection.privateKeyEncrypted) {
+      return 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
+    }
+    return 'bg-amber-500/20 text-amber-400 border border-amber-500/30';
+  };
+
   return (
     <div
-      className="group bg-background-light border border-border rounded-xl p-4 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 hover:scale-[1.02] transition-all duration-200 cursor-pointer"
+      className={`group relative rounded-xl border transition-all duration-300 cursor-pointer overflow-hidden
+        ${connection.isFavorite
+          ? 'border-warning/40 bg-gradient-to-br from-warning/10 to-background-light shadow-lg shadow-warning/10'
+          : 'border-border bg-background-light hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5'
+        }
+        ${isExpanded ? 'ring-2 ring-primary/30' : 'hover:scale-[1.02]'}
+      `}
       onClick={onConnect}
       title={`Click to connect to ${connection.name}`}
     >
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h3 className="font-medium text-text-primary truncate">{connection.name}</h3>
-            {connection.isFavorite && <Star className="w-4 h-4 text-warning fill-warning" />}
-            <Terminal className="w-3 h-3 text-primary opacity-0 group-hover:opacity-100 transition-opacity ml-1" />
-          </div>
-          <p className="text-xs text-text-muted mt-0.5 truncate">
-            {connection.username}@{connection.host}
-          </p>
-        </div>
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleFavorite();
-            }}
-            className={`p-1.5 rounded-lg hover:bg-background-lighter transition-colors ${
-              connection.isFavorite ? 'text-warning' : 'text-text-muted hover:text-warning'
-            }`}
-            title={connection.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-          >
-            <Star className={`w-3.5 h-3.5 ${connection.isFavorite ? 'fill-current' : ''}`} />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdit();
-            }}
-            className="p-1.5 rounded-lg hover:bg-background-lighter text-text-muted hover:text-text-primary transition-colors"
-            title="Edit"
-          >
-            <Edit2 className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            className="p-1.5 rounded-lg hover:bg-danger/10 text-text-muted hover:text-danger transition-colors"
-            title="Delete"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
+      {/* Gradient overlay for favorites */}
+      {connection.isFavorite && (
+        <div className="absolute inset-0 bg-gradient-to-r from-warning/5 via-transparent to-transparent pointer-events-none" />
+      )}
 
-      {/* Connection Info */}
-      <div className="space-y-2 mb-3">
-        <div className="flex items-center gap-2 text-xs text-text-secondary">
-          <span className="px-2 py-0.5 bg-background rounded text-text-muted">Port {connection.port}</span>
-          <span className="flex items-center gap-1 px-2 py-0.5 bg-background rounded text-text-muted">
+      {/* Main Content */}
+      <div className="relative p-4 space-y-3">
+        {/* Header with Title and Quick Actions */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              {connection.isFavorite && (
+                <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-warning/20 border border-warning/30">
+                  <Star className="w-3 h-3 text-warning fill-warning" />
+                  <span className="text-xs font-semibold text-warning">Favorite</span>
+                </div>
+              )}
+            </div>
+            <h3 className="font-bold text-lg text-text-primary truncate">{connection.name}</h3>
+            <p className="text-sm text-text-muted mt-1">
+              {connection.username}@{connection.host}:{connection.port}
+            </p>
+          </div>
+
+          {/* Quick Action Buttons - Hover Reveal */}
+          <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleFavorite();
+              }}
+              className={`p-2 rounded-lg transition-all duration-200 ${
+                connection.isFavorite
+                  ? 'bg-warning/20 text-warning border border-warning/30'
+                  : 'bg-background-lighter text-text-muted hover:text-warning hover:bg-warning/10 border border-transparent hover:border-warning/30'
+              }`}
+              title={connection.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+            >
+              <Star className={`w-4 h-4 ${connection.isFavorite ? 'fill-current' : ''}`} />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit();
+              }}
+              className="p-2 rounded-lg bg-background-lighter text-text-muted hover:text-primary hover:bg-primary/10 border border-transparent hover:border-primary/30 transition-all duration-200"
+              title="Edit connection"
+            >
+              <Edit2 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              className="p-2 rounded-lg bg-background-lighter text-text-muted hover:text-danger hover:bg-danger/10 border border-transparent hover:border-danger/30 transition-all duration-200"
+              title="Delete connection"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Connection Info Badges */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg ${getAuthBadgeColor()} text-xs font-semibold`}>
             {getAuthIcon()}
-            {connection.privateKeyEncrypted ? 'Key' : 'Password'}
-          </span>
-        </div>
-        {connection.tags && connection.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {connection.tags.slice(0, 3).map((tag) => (
-              <span key={tag} className="px-2 py-0.5 text-xs bg-primary/10 text-primary rounded">
-                {tag}
-              </span>
-            ))}
-            {connection.tags.length > 3 && (
-              <span className="px-2 py-0.5 text-xs bg-background-lighter text-text-muted rounded">
-                +{connection.tags.length - 3}
-              </span>
-            )}
+            {connection.privateKeyEncrypted ? 'SSH Key' : 'Password'}
           </div>
-        )}
-      </div>
-
-      {/* SSH Command Preview */}
-      <div className="bg-background rounded-lg p-3 mb-3 border border-border/50">
-        <code className="text-xs text-primary font-mono break-all">
-          ssh {connection.username}@{connection.host} -p {connection.port}
-        </code>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1 text-xs text-text-muted">
-          <Clock className="w-3 h-3" />
-          {formatDate(connection.createdAt)}
+          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg ${getPortBadgeColor()} text-xs font-semibold`}>
+            <Terminal className="w-3 h-3" />
+            Port {connection.port}
+          </div>
+          {connection.tags && connection.tags.length > 0 && (
+            <div className="flex items-center gap-1">
+              {connection.tags.slice(0, 2).map((tag) => (
+                <span
+                  key={tag}
+                  className="px-2.5 py-1 rounded-lg bg-secondary/15 text-secondary text-xs font-medium border border-secondary/25"
+                >
+                  {tag}
+                </span>
+              ))}
+              {connection.tags.length > 2 && (
+                <span className="px-2.5 py-1 rounded-lg bg-background-lighter text-text-muted text-xs font-medium border border-border/50">
+                  +{connection.tags.length - 2}
+                </span>
+              )}
+            </div>
+          )}
         </div>
-        <div className="flex items-center justify-between w-full">
+
+        {/* Quick Connect Button */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onConnect();
+          }}
+          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg font-semibold text-white bg-gradient-to-r from-primary to-primary-dark hover:shadow-lg hover:shadow-primary/30 hover:scale-105 disabled:opacity-70 disabled:scale-100 transition-all duration-200 group/btn"
+        >
+          <Terminal className="w-4 h-4" />
+          <span>Quick Connect</span>
+          <Zap className="w-4 h-4 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+        </button>
+
+        {/* Expandable Details Section */}
+        <div className="border-t border-border/40">
           <button
-            onClick={handleCopy}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg bg-background-lighter text-text-secondary hover:text-text-primary hover:bg-background transition-colors"
-            title="Copy SSH command"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsExpanded(!isExpanded);
+            }}
+            className="w-full flex items-center justify-between px-4 py-3 text-text-secondary hover:text-text-primary transition-colors"
           >
-            {showCopied ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
-            {showCopied ? 'Copied!' : 'Copy'}
+            <span className="text-xs font-semibold uppercase tracking-wide">More Details</span>
+            <svg
+              className={`w-4 h-4 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+            </svg>
           </button>
-          <div className="text-xs text-text-muted opacity-0 group-hover:opacity-100 transition-opacity">
-            Click to connect
-          </div>
+
+          {isExpanded && (
+            <div className="px-4 pb-4 space-y-3 border-t border-border/40">
+              {/* SSH Command */}
+              <div className="space-y-2">
+                <div className="relative group/cmd">
+                  <div className="bg-background rounded-lg p-3 border border-border/50 font-mono text-xs text-primary break-all pr-10">
+                    ssh {connection.username}@{connection.host} -p {connection.port}
+                  </div>
+                  <button
+                    onClick={handleCopy}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-background-lighter text-text-muted hover:text-text-primary hover:bg-primary/10 border border-transparent hover:border-primary/30 transition-all opacity-0 group-hover/cmd:opacity-100"
+                    title="Copy command"
+                  >
+                    {showCopied ? (
+                      <Check className="w-4 h-4 text-success" />
+                    ) : (
+                      <Copy className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Created Date */}
+              <div className="flex items-center gap-2 text-xs text-text-muted">
+                <Clock className="w-3.5 h-3.5" />
+                <span>Added {formatDate(connection.createdAt)}</span>
+              </div>
+
+              {/* Connection Status Indicator */}
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
+                <span className="text-text-secondary">Ready to connect</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

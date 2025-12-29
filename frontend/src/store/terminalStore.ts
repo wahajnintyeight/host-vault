@@ -55,6 +55,7 @@ interface TerminalStore {
   // Terminal operations
   createLocalTerminal: (shell?: string, cwd?: string) => Promise<string>;
   createSSHTerminal: (host: string, port: number, username: string, password: string, privateKey?: string, name?: string) => Promise<string>;
+  createQuickSSHTerminal: (username: string, host: string, port: number, password?: string) => Promise<string>;
   closeTerminal: (sessionId: string) => Promise<void>;
   reconnectTerminal: (sessionId: string, host: string, port: number, username: string, password: string, privateKey?: string) => Promise<void>;
   setConnecting: (sessionId: string | null) => void;
@@ -331,6 +332,53 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     } catch (error) {
       set({ connectingSessionId: null });
       console.error('[TERM] Failed to create SSH terminal:', error);
+      throw error;
+    }
+  },
+
+  createQuickSSHTerminal: async (username, host, port, password = '') => {
+    if (!isWailsAvailable()) {
+      throw new Error('Wails backend not available. Please restart the application.');
+    }
+    console.log('[TERM] Creating quick SSH terminal:', { host, port, username });
+
+    try {
+      const sessionId = await CreateSSHTerminal(host, port, username, password, '');
+      console.log('[TERM] Quick SSH terminal created with session ID:', sessionId);
+
+      const session: TerminalSession = {
+        id: sessionId,
+        type: SessionType.SSH,
+        metadata: {
+          workingDirectory: '',
+          shell: 'remote-shell',
+          environment: {},
+          createdAt: new Date().toISOString(),
+          state: SessionState.Active,
+          sshConfig: {
+            host,
+            port,
+            username,
+            password,
+            privateKey: undefined,
+          },
+        },
+        title: `SSH: ${username}@${host}`,
+      };
+
+      get().addSession(session);
+
+      const tab: TerminalTab = {
+        id: uuid(),
+        sessionId,
+        title: session.title,
+      };
+
+      get().addTab(tab);
+
+      return sessionId;
+    } catch (error) {
+      console.error('[TERM] Failed to create quick SSH terminal:', error);
       throw error;
     }
   },

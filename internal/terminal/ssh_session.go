@@ -53,7 +53,7 @@ func (sb *ScrollbackBuffer) GetAll() [][]byte {
 	}
 
 	result := make([][]byte, sb.size)
-	
+
 	// If buffer is not full, read from start
 	if sb.size < sb.capacity {
 		for i := 0; i < sb.size; i++ {
@@ -102,15 +102,22 @@ func NewSSHSession(connectionID string, config ConnectionConfig) (*SSHSession, e
 
 	var authMethods []ssh.AuthMethod
 
+	// Always try password auth if provided
 	if config.Password != "" {
 		authMethods = append(authMethods, ssh.Password(config.Password))
 	}
 
+	// Try private key if provided
 	if config.PrivateKey != "" {
 		signer, err := ssh.ParsePrivateKey([]byte(config.PrivateKey))
 		if err == nil {
 			authMethods = append(authMethods, ssh.PublicKeys(signer))
 		}
+	}
+
+	// If no auth methods provided, try with empty password (for key-based auth or no auth required)
+	if len(authMethods) == 0 {
+		authMethods = append(authMethods, ssh.Password(""))
 	}
 
 	clientConfig := &ssh.ClientConfig{
@@ -185,7 +192,7 @@ func NewSSHSession(connectionID string, config ConnectionConfig) (*SSHSession, e
 			CreatedAt:        time.Now(),
 			State:            SessionStateActive,
 		},
-		buffer:       make(chan []byte, 100), // Smaller buffer, rely on scrollback
+		buffer:       make(chan []byte, 100),    // Smaller buffer, rely on scrollback
 		scrollback:   NewScrollbackBuffer(5000), // Keep last 5000 chunks
 		closed:       false,
 		connectionID: connectionID,

@@ -13,7 +13,7 @@ import {
   SortableContext,
   horizontalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { Plus } from 'lucide-react';
+import { Plus, Zap } from 'lucide-react';
 import { TerminalTab, SessionType } from '../../types/terminal';
 import { Tab } from './Tab';
 
@@ -26,6 +26,7 @@ interface TabBarProps {
   onTabReorder: (fromIndex: number, toIndex: number) => void;
   onTabRename?: (tabId: string, newTitle: string) => void;
   onNewTab: () => void;
+  onQuickConnect?: () => void;
   onCloseOthers?: (tabId: string) => void;
   onCloseRight?: (tabId: string) => void;
   onCloseAll?: () => void;
@@ -45,6 +46,7 @@ export const TabBar: React.FC<TabBarProps> = ({
   onTabReorder,
   onTabRename,
   onNewTab,
+  onQuickConnect,
   onCloseOthers,
   onCloseRight,
   onCloseAll,
@@ -154,6 +156,20 @@ export const TabBar: React.FC<TabBarProps> = ({
       >
         <Plus className="w-4 h-4" />
       </button>
+
+      {/* Quick connect button */}
+      {onQuickConnect && (
+        <button
+          onClick={onQuickConnect}
+          className="flex-shrink-0 p-1.5 mx-1 rounded transition-colors duration-150
+            hover:bg-primary/10 text-text-secondary hover:text-primary"
+          aria-label="Quick connect"
+          title="Quick SSH connection"
+          style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}
+        >
+          <Zap className="w-4 h-4" />
+        </button>
+      )}
     </div>
   );
 };

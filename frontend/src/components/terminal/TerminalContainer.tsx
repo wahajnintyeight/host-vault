@@ -1,8 +1,10 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { useTerminalStore } from '../../store/terminalStore';
 import { TabBar } from './TabBar';
 import Terminal from './Terminal';
 import { SessionType, TerminalTab } from '../../types/terminal';
+import { QuickConnectModal } from '../connections/QuickConnectModal';
+import { PasswordPromptModal } from '../connections/PasswordPromptModal';
 
 interface TerminalTabProps {
   tab: TerminalTab;
@@ -42,6 +44,14 @@ TerminalTabComponent.displayName = 'TerminalTabComponent';
 
 export const TerminalContainer: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [showQuickConnect, setShowQuickConnect] = useState(false);
+  const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [pendingConnection, setPendingConnection] = useState<{
+    username: string;
+    host: string;
+    port: number;
+  } | null>(null);
   
   const {
     tabs,
@@ -53,6 +63,7 @@ export const TerminalContainer: React.FC = () => {
     reorderTabs,
     duplicateTab,
     createLocalTerminal,
+    createQuickSSHTerminal,
   } = useTerminalStore();
 
   useEffect(() => {
@@ -159,6 +170,54 @@ export const TerminalContainer: React.FC = () => {
     });
   }, [createLocalTerminal]);
 
+  const handleQuickConnect = useCallback((username: string, host: string, port: number) => {
+    setPendingConnection({ username, host, port });
+    setIsConnecting(true);
+    
+    createQuickSSHTerminal(username, host, port)
+      .then(() => {
+        setIsConnecting(false);
+        setShowQuickConnect(false);
+        setPendingConnection(null);
+        setShowPasswordPrompt(false);
+      })
+      .catch((error: any) => {
+        // Check if error indicates password is needed
+        if (error?.message?.includes('permission denied') || error?.message?.includes('auth')) {
+          setIsConnecting(false);
+          setShowQuickConnect(false);
+          setShowPasswordPrompt(true);
+        } else {
+          setIsConnecting(false);
+          setPendingConnection(null);
+          setShowQuickConnect(false);
+          setShowPasswordPrompt(false);
+          console.error('Failed to connect:', error);
+        }
+      });
+  }, [createQuickSSHTerminal]);
+
+  const handlePasswordSubmit = useCallback((password: string) => {
+    if (!pendingConnection) return;
+    
+    setIsConnecting(true);
+    createQuickSSHTerminal(
+      pendingConnection.username,
+      pendingConnection.host,
+      pendingConnection.port,
+      password
+    )
+      .then(() => {
+        setIsConnecting(false);
+        setShowPasswordPrompt(false);
+        setPendingConnection(null);
+      })
+      .catch((error) => {
+        setIsConnecting(false);
+        console.error('Failed to connect with password:', error);
+      });
+  }, [pendingConnection, createQuickSSHTerminal]);
+
   const handleCloseOthers = useCallback((tabId: string) => {
     const tabsToClose = tabs.filter(t => t.id !== tabId);
     tabsToClose.forEach(t => removeTab(t.id));
@@ -196,6 +255,7 @@ export const TerminalContainer: React.FC = () => {
         onTabReorder={handleTabReorder}
         onTabDuplicate={handleTabDuplicate}
         onNewTab={handleNewTab}
+        onQuickConnect={() => setShowQuickConnect(true)}
         onCloseOthers={handleCloseOthers}
         onCloseRight={handleCloseRight}
         onCloseAll={handleCloseAll}
@@ -211,6 +271,30 @@ export const TerminalContainer: React.FC = () => {
           />
         ))}
       </div>
+
+      <QuickConnectModal
+        isOpen={showQuickConnect}
+        isConnecting={isConnecting}
+        onConnect={handleQuickConnect}
+        onClose={() => {
+          setShowQuickConnect(false);
+          setPendingConnection(null);
+        }}
+      />
+
+      {pendingConnection && (
+        <PasswordPromptModal
+          isOpen={showPasswordPrompt}
+          isConnecting={isConnecting}
+          host={pendingConnection.host}
+          username={pendingConnection.username}
+          onSubmit={handlePasswordSubmit}
+          onCancel={() => {
+            setShowPasswordPrompt(false);
+            setPendingConnection(null);
+          }}
+        />
+      )}
     </div>
   );
 };
