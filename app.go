@@ -374,3 +374,34 @@ func (a *App) GetTerminalMetadata(sessionID string) (terminal.SessionMetadata, e
 	}
 	return a.terminalManager.GetSessionMetadata(sessionID)
 }
+
+// GetSSHHostKeyInfo gets the host key fingerprint for an SSH host
+func (a *App) GetSSHHostKeyInfo(host string, port int) (map[string]interface{}, error) {
+	if a.terminalManager == nil {
+		return nil, errors.New("terminal manager not initialized")
+	}
+	
+	info, err := a.terminalManager.GetHostKeyInfo(host, port)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get host key info: %w", err)
+	}
+	
+	return map[string]interface{}{
+		"fingerprintSHA256":   info.FingerprintSHA256,
+		"fingerprintMD5":      info.FingerprintMD5,
+		"keyType":             info.KeyType,
+		"keyBase64":           info.KeyBase64,
+		"isKnown":             info.IsKnown,
+		"isMismatch":          info.IsMismatch,
+		"expectedFingerprint": info.ExpectedFingerprint,
+	}, nil
+}
+
+// AcceptSSHHostKey accepts and stores an SSH host key
+func (a *App) AcceptSSHHostKey(host string, port int, keyBase64 string) error {
+	if a.terminalManager == nil {
+		return errors.New("terminal manager not initialized")
+	}
+	
+	return a.terminalManager.AcceptHostKey(host, port, keyBase64)
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"sync"
 	"time"
 
@@ -96,7 +97,7 @@ type ConnectionConfig struct {
 	PrivateKey string
 }
 
-func NewSSHSession(connectionID string, config ConnectionConfig) (*SSHSession, error) {
+func NewSSHSession(connectionID string, config ConnectionConfig, knownHostsMgr *KnownHostsManager) (*SSHSession, error) {
 	sessionID := uuid.New().String()
 	log.Printf("[SSH] Creating new SSH session %s for connection %s", sessionID, connectionID)
 
@@ -120,10 +121,21 @@ func NewSSHSession(connectionID string, config ConnectionConfig) (*SSHSession, e
 		authMethods = append(authMethods, ssh.Password(""))
 	}
 
+	// Set up host key verification
+	var hostKeyCallback ssh.HostKeyCallback
+	if knownHostsMgr != nil {
+		hostKeyCallback = func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			return knownHostsMgr.VerifyHostKey(config.Host, config.Port, remote, key)
+		}
+	} else {
+		// Fallback to insecure if known hosts manager is not available
+		hostKeyCallback = ssh.InsecureIgnoreHostKey()
+	}
+
 	clientConfig := &ssh.ClientConfig{
 		User:            config.Username,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKeyCallback,
 		Timeout:         30 * time.Second,
 	}
 

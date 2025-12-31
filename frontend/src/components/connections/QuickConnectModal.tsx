@@ -85,14 +85,10 @@ export const QuickConnectModal: React.FC<QuickConnectModalProps> = ({
             <p className="text-sm text-text-muted">
               Paste your SSH command or connection string:
             </p>
-            <div className="bg-background rounded-lg p-3 border border-border/50">
-              <code className="text-xs text-primary font-mono">ssh user@host -p 22</code>
-            </div>
           </div>
 
           {/* Input Field */}
           <div>
-            <label className="block text-xs font-medium text-text-muted mb-2">SSH Command</label>
             <div className="relative">
               <input
                 type="text"

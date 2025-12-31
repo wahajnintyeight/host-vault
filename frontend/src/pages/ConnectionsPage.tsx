@@ -1,21 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   Plus,
   Search,
-  Edit2,
-  Trash2,
-  Copy,
   Download,
   Upload,
   Server,
-  Clock,
   Loader2,
-  Check,
-  Star,
-  Key,
-  Lock,
   Terminal,
   Zap,
+  Star,
 } from 'lucide-react';
 import { useConnectionStore } from '../store/connectionStore';
 import { useNavigate } from 'react-router-dom';
@@ -24,9 +17,31 @@ import { useTerminalStore } from '../store/terminalStore';
 import { ConnectionModal, ConnectionFormData } from '../components/connections/ConnectionModal';
 import { QuickConnectModal } from '../components/connections/QuickConnectModal';
 import { PasswordPromptModal } from '../components/connections/PasswordPromptModal';
+import { HostKeyVerificationModal } from '../components/connections/HostKeyVerificationModal';
+import { ConnectionFlowModal } from '../components/connections/ConnectionFlowModal';
+import { ConnectionCard } from '../components/connections/ConnectionCard';
 import type { SSHConnection } from '../types';
 import { encryptPassword, encryptPrivateKey, decryptPassword, decryptPrivateKey } from '../lib/encryption/crypto';
 import { useAuthStore } from '../store/authStore';
+import { ShowSaveFileDialog, WriteFile } from '../../wailsjs/go/main/App';
+
+// Access Wails functions through window object to avoid TypeScript import errors
+// These functions will be available after bindings are regenerated with 'wails dev' or 'wails build'
+const getSSHHostKeyInfo = (host: string, port: number): Promise<any> | undefined => {
+  const wailsApp = (window as any)?.go?.main?.App;
+  if (wailsApp?.GetSSHHostKeyInfo) {
+    return wailsApp.GetSSHHostKeyInfo(host, port);
+  }
+  return undefined;
+};
+
+const acceptSSHHostKey = (host: string, port: number, keyBase64: string): Promise<void> | undefined => {
+  const wailsApp = (window as any)?.go?.main?.App;
+  if (wailsApp?.AcceptSSHHostKey) {
+    return wailsApp.AcceptSSHHostKey(host, port, keyBase64);
+  }
+  return undefined;
+};
 
 export const ConnectionsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -48,6 +63,14 @@ export const ConnectionsPage: React.FC = () => {
   const [editingConnection, setEditingConnection] = useState<SSHConnection | null>(null);
   const [showQuickConnect, setShowQuickConnect] = useState(false);
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
+  const [showHostKeyVerification, setShowHostKeyVerification] = useState(false);
+  const [showConnectionFlow, setShowConnectionFlow] = useState(false);
+  const [hostKeyVerificationInfo, setHostKeyVerificationInfo] = useState<{
+    host: string;
+    port: number;
+    connection: SSHConnection;
+  } | null>(null);
+  const [flowConnection, setFlowConnection] = useState<SSHConnection | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [pendingConnection, setPendingConnection] = useState<{
     username: string;
@@ -63,6 +86,13 @@ export const ConnectionsPage: React.FC = () => {
     error: null,
     isRetrying: false,
   });
+  const [selectedConnectionIds, setSelectedConnectionIds] = useState<Set<string>>(new Set());
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [dragEnd, setDragEnd] = useState<{ x: number; y: number } | null>(null);
+  const [isMultiSelectDrag, setIsMultiSelectDrag] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   useEffect(() => {
     // Load connections from localStorage
@@ -77,8 +107,225 @@ export const ConnectionsPage: React.FC = () => {
     }
   }, [setConnections]);
 
+  // Calculate selection box bounds
+  const getSelectionBox = () => {
+    if (!dragStart || !dragEnd) return null;
+    return {
+      left: Math.min(dragStart.x, dragEnd.x),
+      top: Math.min(dragStart.y, dragEnd.y),
+      right: Math.max(dragStart.x, dragEnd.x),
+      bottom: Math.max(dragStart.y, dragEnd.y),
+    };
+  };
+
+  // Check if a card intersects with selection box
+  const isCardInSelection = useCallback((cardId: string) => {
+    const box = getSelectionBox();
+    if (!box) return false;
+
+    const card = cardRefs.current.get(cardId);
+    if (!card) return false;
+
+    const cardRect = card.getBoundingClientRect();
+    const containerRect = containerRef.current?.getBoundingClientRect();
+    if (!containerRect) return false;
+
+    // Convert to container-relative coordinates
+    const cardLeft = cardRect.left - containerRect.left;
+    const cardTop = cardRect.top - containerRect.top;
+    const cardRight = cardRect.right - containerRect.left;
+    const cardBottom = cardRect.bottom - containerRect.top;
+
+    // Check intersection
+    return !(
+      box.right < cardLeft ||
+      box.left > cardRight ||
+      box.bottom < cardTop ||
+      box.top > cardBottom
+    );
+  }, [dragStart, dragEnd]);
+
+  // Update selection based on drag box
+  useEffect(() => {
+    if (!isDragging || !dragStart || !dragEnd) return;
+
+    const cardsInBox = new Set<string>();
+    filteredConnections.forEach((conn) => {
+      if (isCardInSelection(conn.id)) {
+        cardsInBox.add(conn.id);
+      }
+    });
+
+    if (isMultiSelectDrag) {
+      // Add to existing selection
+      setSelectedConnectionIds((prev) => {
+        const newSet = new Set(prev);
+        cardsInBox.forEach((id) => newSet.add(id));
+        return newSet;
+      });
+    } else {
+      // Replace selection
+      setSelectedConnectionIds(cardsInBox);
+    }
+  }, [isDragging, dragStart, dragEnd, filteredConnections, isCardInSelection, isMultiSelectDrag]);
+
+  // Mouse event handlers for drag selection
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    // Don't start drag if clicking on buttons, modals, inputs, or cards directly
+    const target = e.target as HTMLElement;
+    if (
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('[role="dialog"]') ||
+      target.closest('.modal') ||
+      target.closest('.connection-card')
+    ) {
+      return;
+    }
+
+    if (e.button === 0) { // Left mouse button
+      e.preventDefault(); // Prevent text selection
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) {
+        const isMulti = e.ctrlKey || e.metaKey;
+        setIsMultiSelectDrag(isMulti);
+        setIsDragging(true);
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        setDragStart({ x, y });
+        setDragEnd({ x, y });
+        // Clear selection when starting new drag (unless Ctrl/Cmd is held)
+        if (!isMulti) {
+          setSelectedConnectionIds(new Set());
+        }
+      }
+    }
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isDragging || !dragStart) return;
+
+    e.preventDefault(); // Prevent text selection during drag
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (rect) {
+      setDragEnd({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      });
+    }
+  }, [isDragging, dragStart]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+    setDragStart(null);
+    setDragEnd(null);
+  }, []);
+
+  // Clear selection when clicking outside cards (but not during drag)
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (isDragging) return;
+      
+      const target = e.target as HTMLElement;
+      // Don't clear if clicking on buttons, modals, or cards
+      if (
+        target.closest('.connection-card') ||
+        target.closest('button') ||
+        target.closest('[role="dialog"]') ||
+        target.closest('.modal')
+      ) {
+        return;
+      }
+      setSelectedConnectionIds(new Set());
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [isDragging]);
+
   const saveToStorage = (conns: SSHConnection[]) => {
     localStorage.setItem('ssh-connections', JSON.stringify({ connections: conns }));
+  };
+
+  const saveQuickConnectConnection = (username: string, host: string, port: number, password?: string) => {
+    // Check if connection already exists
+    const existing = connections.find(
+      c => c.host === host && c.port === port && c.username === username
+    );
+
+    if (existing) {
+      // Update existing connection with password if provided
+      if (password) {
+        let passwordEncrypted: string | undefined;
+        if (!isGuestMode) {
+          const encryptionKey = localStorage.getItem('vault_encryption_key');
+          if (encryptionKey) {
+            try {
+              const encrypted = encryptPassword(password, encryptionKey);
+              passwordEncrypted = JSON.stringify(encrypted);
+            } catch (error) {
+              console.error('Failed to encrypt password:', error);
+              passwordEncrypted = password;
+            }
+          } else {
+            passwordEncrypted = password;
+          }
+        } else {
+          passwordEncrypted = password;
+        }
+
+        const updated: SSHConnection = {
+          ...existing,
+          passwordEncrypted,
+          updatedAt: new Date().toISOString(),
+        };
+        updateConnection(existing.id, updated);
+        const newConns = connections.map(c => c.id === existing.id ? updated : c);
+        saveToStorage(newConns);
+      }
+      return existing.id;
+    }
+
+    // Create new connection
+    const now = new Date().toISOString();
+    let passwordEncrypted: string | undefined;
+
+    if (password) {
+      if (!isGuestMode) {
+        const encryptionKey = localStorage.getItem('vault_encryption_key');
+        if (encryptionKey) {
+          try {
+            const encrypted = encryptPassword(password, encryptionKey);
+            passwordEncrypted = JSON.stringify(encrypted);
+          } catch (error) {
+            console.error('Failed to encrypt password:', error);
+            passwordEncrypted = password;
+          }
+        } else {
+          passwordEncrypted = password;
+        }
+      } else {
+        passwordEncrypted = password;
+      }
+    }
+
+    const newConnection: SSHConnection = {
+      id: crypto.randomUUID(),
+      userId: 'guest',
+      name: `${username}@${host}`,
+      host,
+      port,
+      username,
+      passwordEncrypted,
+      isFavorite: false,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    addConnection(newConnection);
+    saveToStorage([...connections, newConnection]);
+    return newConnection.id;
   };
 
   const handleOpenModal = (connection?: SSHConnection) => {
@@ -215,6 +462,14 @@ export const ConnectionsPage: React.FC = () => {
     navigator.clipboard.writeText(cmd);
   };
 
+  const formatDate = (timestamp: string) => {
+    return new Date(timestamp).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
   const handleConnect = async (conn: SSHConnection, isRetry = false) => {
     setConnectingState({
       connectionId: conn.id,
@@ -223,36 +478,41 @@ export const ConnectionsPage: React.FC = () => {
     });
 
     try {
-      let password = '';
-      let privateKey = '';
-
-      // Decrypt passwords if not in guest mode
-      if (!isGuestMode) {
-        const encryptionKey = localStorage.getItem('vault_encryption_key');
-        if (encryptionKey && conn.passwordEncrypted) {
-          try {
-            const passwordData = JSON.parse(conn.passwordEncrypted);
-            password = decryptPassword(passwordData, encryptionKey);
-          } catch (error) {
-            console.error('Failed to decrypt password for connection:', error);
+      // Check host key first
+      const hostKeyInfoResult = getSSHHostKeyInfo(conn.host, conn.port);
+      if (hostKeyInfoResult) {
+        try {
+          const hostKeyInfo = await hostKeyInfoResult;
+          
+          // If host is not known or there's a mismatch, show verification modal
+          if (!hostKeyInfo.isKnown || hostKeyInfo.isMismatch) {
+            setHostKeyVerificationInfo({
+              host: conn.host,
+              port: conn.port,
+              connection: conn,
+            });
+            setShowHostKeyVerification(true);
+            return; // Wait for user to accept/reject
           }
+        } catch (error) {
+          // If we can't get host key info, still try to connect
+          // (the backend will handle the verification)
+          console.warn('Failed to get host key info, proceeding with connection:', error);
         }
-        if (encryptionKey && conn.privateKeyEncrypted) {
-          try {
-            const privateKeyData = JSON.parse(conn.privateKeyEncrypted);
-            privateKey = decryptPrivateKey(privateKeyData, encryptionKey);
-          } catch (error) {
-            console.error('Failed to decrypt private key for connection:', error);
-          }
-        }
-      } else {
-        // In guest mode, passwords are stored as plain text
-        password = conn.passwordEncrypted || '';
-        privateKey = conn.privateKeyEncrypted || '';
       }
 
-      await createSSHTerminal(conn.host, conn.port, conn.username, password, privateKey, conn.name);
-      navigate(ROUTES.TERMINAL);
+      // Host is verified, show connection flow modal
+      // Get the latest connection from the store to ensure we have all fields including encrypted credentials
+      const latestConnection = connections.find(c => c.id === conn.id) || conn;
+      console.log('[CONN] Setting flow connection:', {
+        id: latestConnection.id,
+        host: latestConnection.host,
+        hasPasswordEncrypted: !!latestConnection.passwordEncrypted,
+        hasPrivateKeyEncrypted: !!latestConnection.privateKeyEncrypted,
+        passwordEncryptedLength: latestConnection.passwordEncrypted?.length || 0,
+      });
+      setFlowConnection(latestConnection);
+      setShowConnectionFlow(true);
     } catch (error) {
       console.error('Failed to connect:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -262,7 +522,219 @@ export const ConnectionsPage: React.FC = () => {
         error: errorMessage,
         isRetrying: false,
       });
-      // Don't auto-clear the error state - let user dismiss or retry
+    }
+  };
+
+  const handleConnectionFlowConnect = async (
+    authMethod: 'password' | 'key' | 'certificate',
+    credentials: { password?: string; privateKey?: string; passphrase?: string }
+  ) => {
+    if (!flowConnection) return;
+
+    setIsConnecting(true);
+    setConnectingState({
+      connectionId: flowConnection.id,
+      error: null,
+      isRetrying: false,
+    });
+
+    try {
+      let password = '';
+      let privateKey = '';
+
+      // If credentials are provided, use them; otherwise use saved credentials
+      if (credentials.password || credentials.privateKey) {
+        console.log('[CONN] Using provided credentials');
+        password = authMethod === 'password' ? credentials.password || '' : '';
+        privateKey = (authMethod === 'key' || authMethod === 'certificate') ? credentials.privateKey || '' : '';
+      } else {
+        // Use saved credentials from connection
+        console.log('[CONN] Using saved credentials from connection', {
+          hasPasswordEncrypted: !!flowConnection.passwordEncrypted,
+          hasPrivateKeyEncrypted: !!flowConnection.privateKeyEncrypted,
+          isGuestMode,
+        });
+        
+        if (!isGuestMode) {
+          const encryptionKey = localStorage.getItem('vault_encryption_key');
+          if (encryptionKey && flowConnection.passwordEncrypted) {
+            try {
+              const passwordData = JSON.parse(flowConnection.passwordEncrypted);
+              password = decryptPassword(passwordData, encryptionKey);
+              console.log('[CONN] Decrypted password, length:', password.length);
+            } catch (error) {
+              console.error('Failed to decrypt password for connection:', error);
+            }
+          }
+          if (encryptionKey && flowConnection.privateKeyEncrypted) {
+            try {
+              const privateKeyData = JSON.parse(flowConnection.privateKeyEncrypted);
+              privateKey = decryptPrivateKey(privateKeyData, encryptionKey);
+              console.log('[CONN] Decrypted private key, length:', privateKey.length);
+            } catch (error) {
+              console.error('Failed to decrypt private key for connection:', error);
+            }
+          }
+        } else {
+          // In guest mode, passwords are stored as plain text
+          password = flowConnection.passwordEncrypted || '';
+          privateKey = flowConnection.privateKeyEncrypted || '';
+          console.log('[CONN] Using plain text credentials (guest mode), password length:', password.length);
+        }
+      }
+
+      console.log('[CONN] Final credentials:', {
+        passwordLength: password.length,
+        privateKeyLength: privateKey.length,
+        authMethod,
+      });
+
+      await createSSHTerminal(flowConnection.host, flowConnection.port, flowConnection.username, password, privateKey, flowConnection.name);
+      
+      // Save credentials if provided
+      if (authMethod === 'password' && credentials.password) {
+        let passwordEncrypted: string | undefined;
+        if (!isGuestMode) {
+          const encryptionKey = localStorage.getItem('vault_encryption_key');
+          if (encryptionKey) {
+            try {
+              const encrypted = encryptPassword(credentials.password, encryptionKey);
+              passwordEncrypted = JSON.stringify(encrypted);
+            } catch (error) {
+              console.error('Failed to encrypt password:', error);
+              passwordEncrypted = credentials.password;
+            }
+          } else {
+            passwordEncrypted = credentials.password;
+          }
+        } else {
+          passwordEncrypted = credentials.password;
+        }
+
+        const updated: SSHConnection = {
+          ...flowConnection,
+          passwordEncrypted,
+          updatedAt: new Date().toISOString(),
+        };
+        updateConnection(flowConnection.id, updated);
+        const newConns = connections.map(c => c.id === flowConnection.id ? updated : c);
+        saveToStorage(newConns);
+      } else if ((authMethod === 'key' || authMethod === 'certificate') && credentials.privateKey) {
+        let privateKeyEncrypted: string | undefined;
+        if (!isGuestMode) {
+          const encryptionKey = localStorage.getItem('vault_encryption_key');
+          if (encryptionKey) {
+            try {
+              const encrypted = encryptPrivateKey(credentials.privateKey, encryptionKey);
+              privateKeyEncrypted = JSON.stringify(encrypted);
+            } catch (error) {
+              console.error('Failed to encrypt private key:', error);
+              privateKeyEncrypted = credentials.privateKey;
+            }
+          } else {
+            privateKeyEncrypted = credentials.privateKey;
+          }
+        } else {
+          privateKeyEncrypted = credentials.privateKey;
+        }
+
+        const updated: SSHConnection = {
+          ...flowConnection,
+          privateKeyEncrypted,
+          updatedAt: new Date().toISOString(),
+        };
+        updateConnection(flowConnection.id, updated);
+        const newConns = connections.map(c => c.id === flowConnection.id ? updated : c);
+        saveToStorage(newConns);
+      }
+
+      setIsConnecting(false);
+      setShowConnectionFlow(false);
+      setFlowConnection(null);
+      setConnectingState({
+        connectionId: null,
+        error: null,
+        isRetrying: false,
+      });
+      navigate(ROUTES.TERMINAL);
+    } catch (error) {
+      console.error('Failed to connect:', error);
+      setIsConnecting(false);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setConnectingState({
+        connectionId: flowConnection.id,
+        error: errorMessage,
+        isRetrying: false,
+      });
+      throw error; // Let ConnectionFlowModal handle the error display
+    }
+  };
+
+  const handleConnectionFlowClose = () => {
+    setShowConnectionFlow(false);
+    setFlowConnection(null);
+    setConnectingState({
+      connectionId: null,
+      error: null,
+      isRetrying: false,
+    });
+  };
+
+  const handleHostKeyAccept = async () => {
+    if (!hostKeyVerificationInfo) {
+      return;
+    }
+
+    try {
+      // Get the host key info again to get the keyBase64
+      const hostKeyInfoResult = getSSHHostKeyInfo(hostKeyVerificationInfo.host, hostKeyVerificationInfo.port);
+      if (!hostKeyInfoResult) {
+        throw new Error('Wails bindings not available. Please run "wails dev" or "wails build"');
+      }
+      const hostKeyInfo = await hostKeyInfoResult;
+      
+      // Accept the host key
+      const acceptResult = acceptSSHHostKey(hostKeyVerificationInfo.host, hostKeyVerificationInfo.port, hostKeyInfo.keyBase64);
+      if (!acceptResult) {
+        throw new Error('Wails bindings not available. Please run "wails dev" or "wails build"');
+      }
+      await acceptResult;
+      
+      // Close host key modal and show connection flow
+      // Get the latest connection from the store to ensure we have all fields including encrypted credentials
+      const latestConnection = connections.find(c => c.id === hostKeyVerificationInfo.connection.id) || hostKeyVerificationInfo.connection;
+      console.log('[CONN] Setting flow connection after host key accept:', {
+        id: latestConnection.id,
+        host: latestConnection.host,
+        hasPasswordEncrypted: !!latestConnection.passwordEncrypted,
+        hasPrivateKeyEncrypted: !!latestConnection.privateKeyEncrypted,
+        passwordEncryptedLength: latestConnection.passwordEncrypted?.length || 0,
+      });
+      setShowHostKeyVerification(false);
+      setFlowConnection(latestConnection);
+      setShowConnectionFlow(true);
+      setHostKeyVerificationInfo(null);
+    } catch (error) {
+      console.error('Failed to accept host key:', error);
+      setConnectingState({
+        connectionId: hostKeyVerificationInfo.connection.id,
+        error: error instanceof Error ? error.message : 'Failed to accept host key',
+        isRetrying: false,
+      });
+      setShowHostKeyVerification(false);
+      setHostKeyVerificationInfo(null);
+    }
+  };
+
+  const handleHostKeyReject = () => {
+    setShowHostKeyVerification(false);
+    setHostKeyVerificationInfo(null);
+    if (hostKeyVerificationInfo) {
+      setConnectingState({
+        connectionId: hostKeyVerificationInfo.connection.id,
+        error: null,
+        isRetrying: false,
+      });
     }
   };
 
@@ -299,8 +771,12 @@ export const ConnectionsPage: React.FC = () => {
           setIsConnecting(false);
           setShowQuickConnect(false);
           setShowPasswordPrompt(true);
+          // Save connection without password for now
+          saveQuickConnectConnection(username, host, port);
         } else {
           setIsConnecting(false);
+          // Save connection even on failure
+          saveQuickConnectConnection(username, host, port);
           setPendingConnection(null);
           setShowQuickConnect(false);
           setShowPasswordPrompt(false);
@@ -328,19 +804,71 @@ export const ConnectionsPage: React.FC = () => {
       })
       .catch((error) => {
         setIsConnecting(false);
+        // Save connection with password even on failure
+        saveQuickConnectConnection(
+          pendingConnection.username,
+          pendingConnection.host,
+          pendingConnection.port,
+          password
+        );
+        setShowPasswordPrompt(false);
+        setPendingConnection(null);
         console.error('Failed to connect with password:', error);
       });
   };
 
-  const handleExport = () => {
-    const data = JSON.stringify({ connections }, null, 2);
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'ssh-connections.json';
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleSelectConnection = (connectionId: string, isMultiSelect: boolean) => {
+    setSelectedConnectionIds((prev) => {
+      const newSet = new Set(prev);
+      if (isMultiSelect) {
+        // Toggle selection in multi-select mode
+        if (newSet.has(connectionId)) {
+          newSet.delete(connectionId);
+        } else {
+          newSet.add(connectionId);
+        }
+      } else {
+        // Single select - replace selection
+        if (newSet.has(connectionId) && newSet.size === 1) {
+          // Deselect if clicking the only selected item
+          return new Set();
+        }
+        return new Set([connectionId]);
+      }
+      return newSet;
+    });
+  };
+
+  const handleExport = async () => {
+    // Export selected connections if any are selected, otherwise export all
+    const connectionsToExport = selectedConnectionIds.size > 0
+      ? connections.filter(conn => selectedConnectionIds.has(conn.id))
+      : connections;
+
+    const data = JSON.stringify({ connections: connectionsToExport }, null, 2);
+    
+    try {
+      const defaultFilename = selectedConnectionIds.size > 0
+        ? `ssh-connections-selected-${selectedConnectionIds.size}.json`
+        : 'ssh-connections.json';
+      
+      const filePath = await ShowSaveFileDialog('Export SSH Connections', defaultFilename, 'json');
+      if (filePath) {
+        await WriteFile(filePath, data);
+      }
+    } catch (error) {
+      console.error('Export failed:', error);
+      // Fallback to browser download
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = selectedConnectionIds.size > 0
+        ? `ssh-connections-selected-${selectedConnectionIds.size}.json`
+        : 'ssh-connections.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
   };
 
   const handleImport = () => {
@@ -371,17 +899,19 @@ export const ConnectionsPage: React.FC = () => {
     input.click();
   };
 
-  const formatDate = (timestamp: string) => {
-    return new Date(timestamp).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  };
 
+  const selectionBox = getSelectionBox();
 
   return (
-    <div className="p-6 space-y-6 relative">
+    <div 
+      className="p-6 space-y-6 relative select-none"
+      ref={containerRef}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+      style={{ userSelect: isDragging ? 'none' : 'auto' }}
+    >
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -413,9 +943,15 @@ export const ConnectionsPage: React.FC = () => {
             onClick={handleExport}
             disabled={connections.length === 0}
             className="flex items-center gap-2 px-3 py-2 text-sm bg-background-lighter rounded-lg text-text-secondary hover:text-text-primary hover:bg-background transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            title={selectedConnectionIds.size > 0 ? `Export ${selectedConnectionIds.size} selected connection(s)` : 'Export all connections'}
           >
             <Download className="w-4 h-4" />
             Export
+            {selectedConnectionIds.size > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary/20 text-primary rounded">
+                {selectedConnectionIds.size}
+              </span>
+            )}
           </button>
           <button
             onClick={() => handleOpenModal()}
@@ -467,22 +1003,84 @@ export const ConnectionsPage: React.FC = () => {
             </button>
           )}
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
-          {filteredConnections.map((conn) => (
-            <ConnectionCard
-              key={conn.id}
-              connection={conn}
-              onEdit={() => handleOpenModal(conn)}
-              onDelete={() => handleDelete(conn.id)}
-              onCopy={() => handleCopyCommand(conn)}
-              onConnect={() => handleConnect(conn)}
-              onToggleFavorite={() => handleToggleFavorite(conn)}
-              formatDate={formatDate}
-            />
-          ))}
-        </div>
-      )}
+      ) : (() => {
+        // Split connections into favorites and regular
+        const favorites = filteredConnections.filter(conn => conn.isFavorite);
+        const regular = filteredConnections.filter(conn => !conn.isFavorite);
+
+        return (
+          <div className="space-y-6">
+            {/* Favorites Section */}
+            {favorites.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Star className="w-4 h-4 text-warning fill-warning" />
+                  <h2 className="text-sm font-semibold text-text-primary">Favorites</h2>
+                  <span className="text-xs text-text-muted">({favorites.length})</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+                  {favorites.map((conn) => (
+                    <div
+                      key={conn.id}
+                      ref={(el) => {
+                        if (el) cardRefs.current.set(conn.id, el);
+                        else cardRefs.current.delete(conn.id);
+                      }}
+                    >
+                      <ConnectionCard
+                        connection={conn}
+                        onEdit={() => handleOpenModal(conn)}
+                        onDelete={() => handleDelete(conn.id)}
+                        onCopy={() => handleCopyCommand(conn)}
+                        onConnect={() => handleConnect(conn)}
+                        onToggleFavorite={() => handleToggleFavorite(conn)}
+                        formatDate={formatDate}
+                        isSelected={selectedConnectionIds.has(conn.id)}
+                        onSelect={handleSelectConnection}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Regular Connections Section */}
+            {regular.length > 0 && (
+              <div className="space-y-3">
+                {favorites.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-semibold text-text-primary">All Connections</h2>
+                    <span className="text-xs text-text-muted">({regular.length})</span>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+                  {regular.map((conn) => (
+                    <div
+                      key={conn.id}
+                      ref={(el) => {
+                        if (el) cardRefs.current.set(conn.id, el);
+                        else cardRefs.current.delete(conn.id);
+                      }}
+                    >
+                      <ConnectionCard
+                        connection={conn}
+                        onEdit={() => handleOpenModal(conn)}
+                        onDelete={() => handleDelete(conn.id)}
+                        onCopy={() => handleCopyCommand(conn)}
+                        onConnect={() => handleConnect(conn)}
+                        onToggleFavorite={() => handleToggleFavorite(conn)}
+                        formatDate={formatDate}
+                        isSelected={selectedConnectionIds.has(conn.id)}
+                        onSelect={handleSelectConnection}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Connection Status Overlay */}
       {connectingState.connectionId && (
@@ -605,6 +1203,28 @@ export const ConnectionsPage: React.FC = () => {
         }}
       />
 
+      {/* Host Key Verification Modal */}
+      {hostKeyVerificationInfo && (
+        <HostKeyVerificationModal
+          isOpen={showHostKeyVerification}
+          host={hostKeyVerificationInfo.host}
+          port={hostKeyVerificationInfo.port}
+          onAccept={handleHostKeyAccept}
+          onReject={handleHostKeyReject}
+        />
+      )}
+
+      {/* Connection Flow Modal */}
+      <ConnectionFlowModal
+        isOpen={showConnectionFlow}
+        connection={flowConnection}
+        onClose={handleConnectionFlowClose}
+        onConnect={handleConnectionFlowConnect}
+        isConnecting={isConnecting}
+        error={connectingState.error}
+        hostVerified={true} // Host is already verified if we got here
+      />
+
       {pendingConnection && (
         <PasswordPromptModal
           isOpen={showPasswordPrompt}
@@ -618,243 +1238,19 @@ export const ConnectionsPage: React.FC = () => {
           }}
         />
       )}
-    </div>
-  );
-};
 
-// Connection Card Component
-interface ConnectionCardProps {
-  connection: SSHConnection;
-  onEdit: () => void;
-  onDelete: () => void;
-  onCopy: () => void;
-  onConnect: () => void;
-  onToggleFavorite: () => void;
-  formatDate: (timestamp: string) => string;
-}
-
-const ConnectionCard: React.FC<ConnectionCardProps> = ({
-  connection,
-  onEdit,
-  onDelete,
-  onCopy,
-  onConnect,
-  onToggleFavorite,
-  formatDate,
-}) => {
-  const [showCopied, setShowCopied] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  const handleCopy = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onCopy();
-    setShowCopied(true);
-    setTimeout(() => setShowCopied(false), 2000);
-  };
-
-  const getAuthIcon = () => {
-    if (connection.privateKeyEncrypted) return <Key className="w-3 h-3" />;
-    return <Lock className="w-3 h-3" />;
-  };
-
-  // Get color based on port for visual variety
-  const getPortColor = () => {
-    const portNum = connection.port;
-    if (portNum === 22) return 'from-primary/20 to-primary/10 border-primary/30';
-    if (portNum === 2222) return 'from-secondary/20 to-secondary/10 border-secondary/30';
-    if (portNum > 3000) return 'from-success/20 to-success/10 border-success/30';
-    return 'from-warning/20 to-warning/10 border-warning/30';
-  };
-
-  const getPortBadgeColor = () => {
-    const portNum = connection.port;
-    if (portNum === 22) return 'bg-primary/20 text-primary border border-primary/30';
-    if (portNum === 2222) return 'bg-secondary/20 text-secondary border border-secondary/30';
-    if (portNum > 3000) return 'bg-success/20 text-success border border-success/30';
-    return 'bg-warning/20 text-warning border border-warning/30';
-  };
-
-  const getAuthBadgeColor = () => {
-    if (connection.privateKeyEncrypted) {
-      return 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
-    }
-    return 'bg-amber-500/20 text-amber-400 border border-amber-500/30';
-  };
-
-  return (
-    <div
-      className={`group relative rounded-xl border transition-all duration-300 cursor-pointer overflow-hidden
-        ${connection.isFavorite
-          ? 'border-warning/40 bg-gradient-to-br from-warning/10 to-background-light shadow-lg shadow-warning/10'
-          : 'border-border bg-background-light hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5'
-        }
-        ${isExpanded ? 'ring-2 ring-primary/30' : 'hover:scale-[1.02]'}
-      `}
-      onClick={onConnect}
-      title={`Click to connect to ${connection.name}`}
-    >
-      {/* Gradient overlay for favorites */}
-      {connection.isFavorite && (
-        <div className="absolute inset-0 bg-gradient-to-r from-warning/5 via-transparent to-transparent pointer-events-none" />
-      )}
-
-      {/* Main Content */}
-      <div className="relative p-4 space-y-3">
-        {/* Header with Title and Quick Actions */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              {connection.isFavorite && (
-                <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-warning/20 border border-warning/30">
-                  <Star className="w-3 h-3 text-warning fill-warning" />
-                  <span className="text-xs font-semibold text-warning">Favorite</span>
-                </div>
-              )}
-            </div>
-            <h3 className="font-bold text-lg text-text-primary truncate">{connection.name}</h3>
-            <p className="text-sm text-text-muted mt-1">
-              {connection.username}@{connection.host}:{connection.port}
-            </p>
-          </div>
-
-          {/* Quick Action Buttons - Hover Reveal */}
-          <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleFavorite();
-              }}
-              className={`p-2 rounded-lg transition-all duration-200 ${
-                connection.isFavorite
-                  ? 'bg-warning/20 text-warning border border-warning/30'
-                  : 'bg-background-lighter text-text-muted hover:text-warning hover:bg-warning/10 border border-transparent hover:border-warning/30'
-              }`}
-              title={connection.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-            >
-              <Star className={`w-4 h-4 ${connection.isFavorite ? 'fill-current' : ''}`} />
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onEdit();
-              }}
-              className="p-2 rounded-lg bg-background-lighter text-text-muted hover:text-primary hover:bg-primary/10 border border-transparent hover:border-primary/30 transition-all duration-200"
-              title="Edit connection"
-            >
-              <Edit2 className="w-4 h-4" />
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
-              className="p-2 rounded-lg bg-background-lighter text-text-muted hover:text-danger hover:bg-danger/10 border border-transparent hover:border-danger/30 transition-all duration-200"
-              title="Delete connection"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Connection Info Badges */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg ${getAuthBadgeColor()} text-xs font-semibold`}>
-            {getAuthIcon()}
-            {connection.privateKeyEncrypted ? 'SSH Key' : 'Password'}
-          </div>
-          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg ${getPortBadgeColor()} text-xs font-semibold`}>
-            <Terminal className="w-3 h-3" />
-            Port {connection.port}
-          </div>
-          {connection.tags && connection.tags.length > 0 && (
-            <div className="flex items-center gap-1">
-              {connection.tags.slice(0, 2).map((tag) => (
-                <span
-                  key={tag}
-                  className="px-2.5 py-1 rounded-lg bg-secondary/15 text-secondary text-xs font-medium border border-secondary/25"
-                >
-                  {tag}
-                </span>
-              ))}
-              {connection.tags.length > 2 && (
-                <span className="px-2.5 py-1 rounded-lg bg-background-lighter text-text-muted text-xs font-medium border border-border/50">
-                  +{connection.tags.length - 2}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Quick Connect Button */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onConnect();
+      {/* Selection Box Overlay */}
+      {isDragging && selectionBox && (
+        <div
+          className="absolute border-2 border-primary bg-primary/10 pointer-events-none z-10"
+          style={{
+            left: `${selectionBox.left}px`,
+            top: `${selectionBox.top}px`,
+            width: `${selectionBox.right - selectionBox.left}px`,
+            height: `${selectionBox.bottom - selectionBox.top}px`,
           }}
-          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg font-semibold text-white bg-gradient-to-r from-primary to-primary-dark hover:shadow-lg hover:shadow-primary/30 hover:scale-105 disabled:opacity-70 disabled:scale-100 transition-all duration-200 group/btn"
-        >
-          <Terminal className="w-4 h-4" />
-          <span>Quick Connect</span>
-          <Zap className="w-4 h-4 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
-        </button>
-
-        {/* Expandable Details Section */}
-        <div className="border-t border-border/40">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsExpanded(!isExpanded);
-            }}
-            className="w-full flex items-center justify-between px-4 py-3 text-text-secondary hover:text-text-primary transition-colors"
-          >
-            <span className="text-xs font-semibold uppercase tracking-wide">More Details</span>
-            <svg
-              className={`w-4 h-4 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-            </svg>
-          </button>
-
-          {isExpanded && (
-            <div className="px-4 pb-4 space-y-3 border-t border-border/40">
-              {/* SSH Command */}
-              <div className="space-y-2">
-                <div className="relative group/cmd">
-                  <div className="bg-background rounded-lg p-3 border border-border/50 font-mono text-xs text-primary break-all pr-10">
-                    ssh {connection.username}@{connection.host} -p {connection.port}
-                  </div>
-                  <button
-                    onClick={handleCopy}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-background-lighter text-text-muted hover:text-text-primary hover:bg-primary/10 border border-transparent hover:border-primary/30 transition-all opacity-0 group-hover/cmd:opacity-100"
-                    title="Copy command"
-                  >
-                    {showCopied ? (
-                      <Check className="w-4 h-4 text-success" />
-                    ) : (
-                      <Copy className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* Created Date */}
-              <div className="flex items-center gap-2 text-xs text-text-muted">
-                <Clock className="w-3.5 h-3.5" />
-                <span>Added {formatDate(connection.createdAt)}</span>
-              </div>
-
-              {/* Connection Status Indicator */}
-              <div className="flex items-center gap-2 text-xs">
-                <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
-                <span className="text-text-secondary">Ready to connect</span>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+        />
+      )}
     </div>
   );
 };

@@ -2,23 +2,52 @@ package terminal
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
 
+	"golang.org/x/crypto/ssh"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type TerminalManager struct {
-	sessions map[string]Session
-	mu       sync.RWMutex
-	ctx      context.Context
+	sessions        map[string]Session
+	mu              sync.RWMutex
+	ctx             context.Context
+	knownHostsMgr   *KnownHostsManager
 }
 
 func NewTerminalManager(ctx context.Context) *TerminalManager {
+	// Initialize known hosts manager
+	// Try to get app data path from environment or use default
+	appDataPath := os.Getenv("APPDATA")
+	if appDataPath == "" {
+		// Fallback for non-Windows or if APPDATA is not set
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			log.Printf("[TERM] Failed to get home directory: %v", err)
+			appDataPath = "."
+		} else {
+			appDataPath = filepath.Join(homeDir, "AppData", "Roaming")
+		}
+	}
+	appPath := filepath.Join(appDataPath, "host-vault")
+	
+	knownHostsMgr, err := NewKnownHostsManager(appPath)
+	if err != nil {
+		log.Printf("[TERM] Failed to initialize known hosts manager: %v", err)
+		knownHostsMgr = nil
+	} else {
+		log.Printf("[TERM] Known hosts manager initialized at: %s", appPath)
+	}
+
 	return &TerminalManager{
-		sessions: make(map[string]Session),
-		ctx:      ctx,
+		sessions:      make(map[string]Session),
+		ctx:           ctx,
+		knownHostsMgr: knownHostsMgr,
 	}
 }
 
@@ -39,7 +68,7 @@ func (tm *TerminalManager) CreateLocalSession(shell, cwd string, env map[string]
 
 func (tm *TerminalManager) CreateSSHSession(connectionID string, config ConnectionConfig) (string, error) {
 	log.Printf("[TERM] Creating SSH session for connection %s", connectionID)
-	session, err := NewSSHSession(connectionID, config)
+	session, err := NewSSHSession(connectionID, config, tm.knownHostsMgr)
 	if err != nil {
 		log.Printf("[TERM] Failed to create SSH session for connection %s: %v", connectionID, err)
 		return "", fmt.Errorf("%w", err)
@@ -53,6 +82,35 @@ func (tm *TerminalManager) CreateSSHSession(connectionID string, config Connecti
 	go tm.streamOutput(session)
 
 	return session.ID(), nil
+}
+
+// GetHostKeyInfo gets the host key fingerprint for a host
+func (tm *TerminalManager) GetHostKeyInfo(host string, port int) (*HostKeyInfo, error) {
+	if tm.knownHostsMgr == nil {
+		return nil, fmt.Errorf("known hosts manager not initialized")
+	}
+	return tm.knownHostsMgr.GetHostKeyInfo(host, port)
+}
+
+// AcceptHostKey accepts and stores a host key (keyBase64 is base64 encoded public key)
+func (tm *TerminalManager) AcceptHostKey(host string, port int, keyBase64 string) error {
+	if tm.knownHostsMgr == nil {
+		return fmt.Errorf("known hosts manager not initialized")
+	}
+	
+	// Decode base64 key
+	keyBytes, err := base64.StdEncoding.DecodeString(keyBase64)
+	if err != nil {
+		return fmt.Errorf("failed to decode key: %w", err)
+	}
+	
+	// Parse the public key
+	key, err := ssh.ParsePublicKey(keyBytes)
+	if err != nil {
+		return fmt.Errorf("failed to parse public key: %w", err)
+	}
+	
+	return tm.knownHostsMgr.AddHostKey(host, port, key)
 }
 
 func (tm *TerminalManager) DuplicateSession(sessionID string) (string, error) {
