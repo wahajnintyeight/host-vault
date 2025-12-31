@@ -179,6 +179,40 @@ func (a *App) GetUserSnippetsPath(userId string) (string, error) {
 	return filepath.Join(userPath, "commands.json"), nil
 }
 
+// GetGuestConnectionsPath returns the path to the guest connections file
+// Path: %APPDATA%\host-vault\guest\connections.json
+func (a *App) GetGuestConnectionsPath() (string, error) {
+	appPath, err := a.GetAppDataPath()
+	if err != nil {
+		return "", err
+	}
+
+	guestPath := filepath.Join(appPath, "guest")
+
+	if err := os.MkdirAll(guestPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create guest directory: %w", err)
+	}
+
+	return filepath.Join(guestPath, "connections.json"), nil
+}
+
+// GetUserConnectionsPath returns the path to a user's connections file
+// Path: %APPDATA%\host-vault\users\{userId}\connections.json
+func (a *App) GetUserConnectionsPath(userId string) (string, error) {
+	appPath, err := a.GetAppDataPath()
+	if err != nil {
+		return "", err
+	}
+
+	userPath := filepath.Join(appPath, "users", userId)
+
+	if err := os.MkdirAll(userPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create user directory: %w", err)
+	}
+
+	return filepath.Join(userPath, "connections.json"), nil
+}
+
 // ShowMessageDialog shows a native Windows message dialog
 // This is a placeholder - actual implementation will use Windows API
 func (a *App) ShowMessageDialog(title string, message string, dialogType string) (string, error) {
@@ -307,13 +341,14 @@ func (a *App) CreateSSHTerminal(host string, port int, username, password, priva
 		return "", errors.New("terminal manager not initialized")
 	}
 
+	fmt.Println("Creating SSH terminal for host:", host, "port:", port, "username:", username, "password:", password, "privateKey:", privateKey)
 	config := terminal.ConnectionConfig{
 		Host:       host,
 		Port:       port,
 		Username:   username,
 		Password:   password,
-		PrivateKey: privateKey,
 	}
+	fmt.Println("Config:", config)
 
 	return a.terminalManager.CreateSSHSession("", config)
 }
@@ -375,6 +410,20 @@ func (a *App) GetTerminalMetadata(sessionID string) (terminal.SessionMetadata, e
 	return a.terminalManager.GetSessionMetadata(sessionID)
 }
 
+// GetGuestEncryptionKeyphrase returns the encryption keyphrase for guest mode from environment/config
+func (a *App) GetGuestEncryptionKeyphrase() string {
+	// Try to get from environment variable first
+	keyphrase := os.Getenv("HOST_VAULT_GUEST_KEYPHRASE")
+	fmt.Println("Getting guest encryption keyphrase from environment variable", keyphrase)
+	if keyphrase != "" {
+		return keyphrase
+	}
+	
+	// Default keyphrase (should be changed in production via .env)
+	// In production, this should be set via environment variable
+	return "host-vault-guest-default-keyphrase-change-in-production"
+}
+
 // GetSSHHostKeyInfo gets the host key fingerprint for an SSH host
 func (a *App) GetSSHHostKeyInfo(host string, port int) (map[string]interface{}, error) {
 	if a.terminalManager == nil {
@@ -398,10 +447,11 @@ func (a *App) GetSSHHostKeyInfo(host string, port int) (map[string]interface{}, 
 }
 
 // AcceptSSHHostKey accepts and stores an SSH host key
-func (a *App) AcceptSSHHostKey(host string, port int, keyBase64 string) error {
+// If isGuest is true, the key is only stored in memory and not persisted to disk (for privacy)
+func (a *App) AcceptSSHHostKey(host string, port int, keyBase64 string, isGuest bool) error {
 	if a.terminalManager == nil {
 		return errors.New("terminal manager not initialized")
 	}
 	
-	return a.terminalManager.AcceptHostKey(host, port, keyBase64)
+	return a.terminalManager.AcceptHostKey(host, port, keyBase64, isGuest)
 }

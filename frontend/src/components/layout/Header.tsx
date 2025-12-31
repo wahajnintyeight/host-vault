@@ -136,8 +136,8 @@ export const Header: React.FC = () => {
         <div className="h-5 w-px bg-border/50 flex-shrink-0" />
 
         {/* Terminal tabs - always visible */}
-        <div className="flex-1 min-w-0 no-drag overflow-hidden h-full flex items-center">
-          {tabs.length > 0 ? (
+        <div className="flex-1 min-w-0 no-drag overflow-hidden h-full flex items-center gap-2">
+          {tabs.length > 0 && (
             <TabBar
               tabs={tabs}
               activeTabId={isTerminalPage ? activeTabId : null}
@@ -152,18 +152,19 @@ export const Header: React.FC = () => {
               onCloseAll={handleCloseAll}
               getSessionType={getSessionType}
             />
-          ) : (
-            /* Show "Open Terminal" button when no tabs */
-            <button
-              onClick={handleOpenTerminal}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium
-                text-text-secondary hover:text-text-primary
-                hover:bg-background rounded transition-colors duration-150"
-            >
-              <Terminal size={14} />
-              <span>Open Terminal</span>
-            </button>
           )}
+          {/* Always show "Open Terminal" button */}
+          <button
+            onClick={handleOpenTerminal}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium
+              text-text-secondary hover:text-text-primary
+              hover:bg-background rounded transition-colors duration-150
+              flex-shrink-0"
+            title="Open Terminal"
+          >
+            <Terminal size={14} />
+            <span>Open Terminal</span>
+          </button>
         </div>
       </div>
 

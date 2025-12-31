@@ -11,10 +11,10 @@ const getSSHHostKeyInfo = (host: string, port: number): Promise<any> | undefined
   return undefined;
 };
 
-const acceptSSHHostKey = (host: string, port: number, keyBase64: string): Promise<void> | undefined => {
+const acceptSSHHostKey = (host: string, port: number, keyBase64: string, isGuest: boolean): Promise<void> | undefined => {
   const wailsApp = (window as any)?.go?.main?.App;
   if (wailsApp?.AcceptSSHHostKey) {
-    return wailsApp.AcceptSSHHostKey(host, port, keyBase64);
+    return wailsApp.AcceptSSHHostKey(host, port, keyBase64, isGuest);
   }
   return undefined;
 };
@@ -33,6 +33,7 @@ interface HostKeyVerificationModalProps {
   isOpen: boolean;
   host: string;
   port: number;
+  isGuest?: boolean;
   onAccept: () => void;
   onReject: () => void;
 }
@@ -41,6 +42,7 @@ export const HostKeyVerificationModal: React.FC<HostKeyVerificationModalProps> =
   isOpen,
   host,
   port,
+  isGuest = false,
   onAccept,
   onReject,
 }) => {
@@ -81,7 +83,7 @@ export const HostKeyVerificationModal: React.FC<HostKeyVerificationModalProps> =
     if (!hostKeyInfo) return;
 
     try {
-      const result = acceptSSHHostKey(host, port, hostKeyInfo.keyBase64);
+      const result = acceptSSHHostKey(host, port, hostKeyInfo.keyBase64, isGuest);
       if (!result) {
         throw new Error('Wails bindings not regenerated. Please run "wails dev" or "wails build"');
       }

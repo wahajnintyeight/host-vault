@@ -4,6 +4,7 @@ package terminal
 
 import (
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"runtime"
@@ -82,7 +83,10 @@ func (s *LocalPTYSession) readOutput() {
 		n, err := s.ptyFile.Read(buf)
 		if err != nil {
 			if err != io.EOF {
+				// Log non-EOF errors for debugging
 			}
+			// EOF detected - close buffer channel to signal streamOutput
+			log.Printf("[LOCAL] Session %s readOutput received EOF, closing buffer", s.id)
 			close(s.buffer)
 			return
 		}

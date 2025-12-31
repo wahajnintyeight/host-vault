@@ -1,8 +1,10 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo, memo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTerminalStore } from '../store/terminalStore';
 import Terminal, { TerminalHandle } from '../components/terminal/Terminal';
 import { TerminalDrawer } from '../components/terminal/TerminalDrawer';
 import { PanelRightOpen, PanelRightClose, Server } from 'lucide-react';
+import { ROUTES } from '../lib/constants';
 
 /**
  * Memoized terminal wrapper to prevent re-renders when switching tabs
@@ -63,6 +65,8 @@ TerminalWrapper.displayName = 'TerminalWrapper';
  * Renders all terminal instances but hides inactive ones to preserve scrollback buffer
  */
 export const TerminalPage: React.FC = () => {
+  const navigate = useNavigate();
+  
   // Use shallow selectors to prevent unnecessary re-renders
   const tabs = useTerminalStore((state) => state.tabs);
   const activeTabId = useTerminalStore((state) => state.activeTabId);
@@ -92,6 +96,18 @@ export const TerminalPage: React.FC = () => {
 
   // Get the active terminal handle for the drawer
   const activeTerminalRef = activeSessionId ? terminalRefs.current.get(activeSessionId) : null;
+
+  // Listen for navigate-to-home event (when last local terminal closes)
+  useEffect(() => {
+    const handleNavigateToHome = () => {
+      navigate(ROUTES.HOME);
+    };
+
+    window.addEventListener('navigate-to-home', handleNavigateToHome);
+    return () => {
+      window.removeEventListener('navigate-to-home', handleNavigateToHome);
+    };
+  }, [navigate]);
 
   // Initialize with one default local terminal if no tabs exist
   useEffect(() => {

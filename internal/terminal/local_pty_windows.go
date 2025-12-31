@@ -4,6 +4,7 @@ package terminal
 
 import (
 	"io"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ type LocalPTYSession struct {
 	closed   bool
 	buffer   chan []byte
 	done     chan struct{}
+	bufferCloseOnce sync.Once
 }
 
 func NewLocalPTYSession(shell, cwd string, env map[string]string) (*LocalPTYSession, error) {
@@ -67,6 +69,7 @@ func NewLocalPTYSession(shell, cwd string, env map[string]string) (*LocalPTYSess
 
 func (s *LocalPTYSession) readOutput() {
 	buf := make([]byte, 4096)
+	
 	for {
 		select {
 		case <-s.done:
@@ -75,6 +78,17 @@ func (s *LocalPTYSession) readOutput() {
 			n, err := s.cpty.Read(buf)
 			if err != nil {
 				if err != io.EOF {
+					// For non-EOF errors, check if it's a "broken pipe" or similar
+					// which indicates the process has exited
+					if err.Error() == "EOF" || 
+					   err.Error() == "read: The handle is invalid" ||
+					   err.Error() == "read: The pipe is being closed" {
+						log.Printf("[LOCAL] Session %s readOutput detected process exit (error: %v), closing buffer", s.id, err)
+						s.bufferCloseOnce.Do(func() {
+							close(s.buffer)
+						})
+						return
+					}
 					// Log error but don't close immediately - might be recoverable
 					select {
 					case <-time.After(100 * time.Millisecond):
@@ -84,8 +98,11 @@ func (s *LocalPTYSession) readOutput() {
 					}
 					continue
 				}
-				// Close buffer channel when EOF is reached
-				close(s.buffer)
+				// EOF detected - close buffer channel to signal streamOutput
+				log.Printf("[LOCAL] Session %s readOutput received EOF, closing buffer", s.id)
+				s.bufferCloseOnce.Do(func() {
+					close(s.buffer)
+				})
 				return
 			}
 			if n > 0 {
@@ -100,10 +117,19 @@ func (s *LocalPTYSession) readOutput() {
 				case <-s.done:
 					return
 				}
+			} else if n == 0 {
+				// Zero-length read might indicate process exit on some systems
+				// Give it a brief moment and check again
+				select {
+				case <-time.After(100 * time.Millisecond):
+				case <-s.done:
+					return
+				}
 			}
 		}
 	}
 }
+
 
 func (s *LocalPTYSession) ID() string {
 	return s.id
@@ -148,6 +174,11 @@ func (s *LocalPTYSession) Close() error {
 
 	// Signal readOutput goroutine to stop
 	close(s.done)
+
+	// Ensure buffer is closed (only once)
+	s.bufferCloseOnce.Do(func() {
+		close(s.buffer)
+	})
 
 	if s.cpty != nil {
 		s.cpty.Close()

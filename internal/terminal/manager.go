@@ -93,7 +93,8 @@ func (tm *TerminalManager) GetHostKeyInfo(host string, port int) (*HostKeyInfo, 
 }
 
 // AcceptHostKey accepts and stores a host key (keyBase64 is base64 encoded public key)
-func (tm *TerminalManager) AcceptHostKey(host string, port int, keyBase64 string) error {
+// If isGuest is true, the key is only stored in memory and not persisted to disk
+func (tm *TerminalManager) AcceptHostKey(host string, port int, keyBase64 string, isGuest bool) error {
 	if tm.knownHostsMgr == nil {
 		return fmt.Errorf("known hosts manager not initialized")
 	}
@@ -110,7 +111,7 @@ func (tm *TerminalManager) AcceptHostKey(host string, port int, keyBase64 string
 		return fmt.Errorf("failed to parse public key: %w", err)
 	}
 	
-	return tm.knownHostsMgr.AddHostKey(host, port, key)
+	return tm.knownHostsMgr.AddHostKey(host, port, key, isGuest)
 }
 
 func (tm *TerminalManager) DuplicateSession(sessionID string) (string, error) {

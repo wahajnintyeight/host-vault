@@ -21,9 +21,37 @@ import { HostKeyVerificationModal } from '../components/connections/HostKeyVerif
 import { ConnectionFlowModal } from '../components/connections/ConnectionFlowModal';
 import { ConnectionCard } from '../components/connections/ConnectionCard';
 import type { SSHConnection } from '../types';
-import { encryptPassword, encryptPrivateKey, decryptPassword, decryptPrivateKey } from '../lib/encryption/crypto';
+import { encryptPassword, encryptPrivateKey, decryptPassword, decryptPrivateKey, encryptDataWithKeyphrase, decryptDataWithKeyphrase } from '../lib/encryption/crypto';
 import { useAuthStore } from '../store/authStore';
 import { ShowSaveFileDialog, WriteFile } from '../../wailsjs/go/main/App';
+import { loadConnectionsFromFile, saveConnectionsToFile } from '../lib/storage/connectionStorage';
+
+// Access Wails function to get guest encryption keyphrase
+const getGuestEncryptionKeyphrase = async (): Promise<string | undefined> => {
+  const wailsApp = (window as any)?.go?.main?.App;
+  if (wailsApp?.GetGuestEncryptionKeyphrase) {
+    const keyphrase = await wailsApp.GetGuestEncryptionKeyphrase();
+    console.log("Getting guest encryption keyphrase");
+    return keyphrase;
+  }
+  return undefined;
+};
+
+// Helper function to safely parse JSON or return original string
+const tryParseJSON = (str: string): any => {
+  try {
+    // Check if string looks like JSON (starts with { or [)
+    const trimmed = str.trim();
+    if ((trimmed.startsWith('{') || trimmed.startsWith('[')) && trimmed.length > 2) {
+      return JSON.parse(str);
+    }
+    // Not JSON, return original string
+    return null;
+  } catch {
+    // Not valid JSON, return null to indicate it's plain text
+    return null;
+  }
+};
 
 // Access Wails functions through window object to avoid TypeScript import errors
 // These functions will be available after bindings are regenerated with 'wails dev' or 'wails build'
@@ -35,10 +63,10 @@ const getSSHHostKeyInfo = (host: string, port: number): Promise<any> | undefined
   return undefined;
 };
 
-const acceptSSHHostKey = (host: string, port: number, keyBase64: string): Promise<void> | undefined => {
+const acceptSSHHostKey = (host: string, port: number, keyBase64: string, isGuest: boolean): Promise<void> | undefined => {
   const wailsApp = (window as any)?.go?.main?.App;
   if (wailsApp?.AcceptSSHHostKey) {
-    return wailsApp.AcceptSSHHostKey(host, port, keyBase64);
+    return wailsApp.AcceptSSHHostKey(host, port, keyBase64, isGuest);
   }
   return undefined;
 };
@@ -57,7 +85,7 @@ export const ConnectionsPage: React.FC = () => {
     setConnections,
   } = useConnectionStore();
   const { createSSHTerminal } = useTerminalStore();
-  const { isGuestMode } = useAuthStore();
+  const { isGuestMode, user } = useAuthStore();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<SSHConnection | null>(null);
@@ -95,17 +123,28 @@ export const ConnectionsPage: React.FC = () => {
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   useEffect(() => {
-    // Load connections from localStorage
-    const stored = localStorage.getItem('ssh-connections');
-    if (stored) {
+    // Load connections from file storage
+    const loadConnections = async () => {
       try {
-        const data = JSON.parse(stored);
-        setConnections(data.connections || []);
+        const userId = user?.id;
+        const loadedConnections = await loadConnectionsFromFile(isGuestMode, userId);
+        setConnections(loadedConnections);
       } catch (e) {
         console.error('Failed to load connections:', e);
+        // Fallback to localStorage for backward compatibility
+        const stored = localStorage.getItem('ssh-connections');
+        if (stored) {
+          try {
+            const data = JSON.parse(stored);
+            setConnections(data.connections || []);
+          } catch (err) {
+            console.error('Failed to load connections from localStorage:', err);
+          }
+        }
       }
-    }
-  }, [setConnections]);
+    };
+    loadConnections();
+  }, [setConnections, isGuestMode, user?.id]);
 
   // Calculate selection box bounds
   const getSelectionBox = () => {
@@ -225,7 +264,7 @@ export const ConnectionsPage: React.FC = () => {
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (isDragging) return;
-      
+
       const target = e.target as HTMLElement;
       // Don't clear if clicking on buttons, modals, or cards
       if (
@@ -243,11 +282,18 @@ export const ConnectionsPage: React.FC = () => {
     return () => document.removeEventListener('click', handleClickOutside);
   }, [isDragging]);
 
-  const saveToStorage = (conns: SSHConnection[]) => {
-    localStorage.setItem('ssh-connections', JSON.stringify({ connections: conns }));
+  const saveToStorage = async (conns: SSHConnection[]) => {
+    try {
+      const userId = user?.id;
+      await saveConnectionsToFile(conns, isGuestMode, userId);
+    } catch (error) {
+      console.error('Failed to save connections to file:', error);
+      // Fallback to localStorage
+      localStorage.setItem('ssh-connections', JSON.stringify({ connections: conns }));
+    }
   };
 
-  const saveQuickConnectConnection = (username: string, host: string, port: number, password?: string) => {
+  const saveQuickConnectConnection = async (username: string, host: string, port: number, password?: string) => {
     // Check if connection already exists
     const existing = connections.find(
       c => c.host === host && c.port === port && c.username === username
@@ -271,7 +317,20 @@ export const ConnectionsPage: React.FC = () => {
             passwordEncrypted = password;
           }
         } else {
-          passwordEncrypted = password;
+          // In guest mode, use keyphrase-based encryption
+          const keyphrase = await getGuestEncryptionKeyphrase();
+          if (keyphrase) {
+            try {
+              const encrypted = encryptDataWithKeyphrase(password, keyphrase);
+              passwordEncrypted = JSON.stringify(encrypted);
+            } catch (error) {
+              console.error('Failed to encrypt password with keyphrase:', error);
+              passwordEncrypted = password;
+            }
+          } else {
+            // Fallback to plain text if keyphrase not available
+            passwordEncrypted = password;
+          }
         }
 
         const updated: SSHConnection = {
@@ -281,7 +340,7 @@ export const ConnectionsPage: React.FC = () => {
         };
         updateConnection(existing.id, updated);
         const newConns = connections.map(c => c.id === existing.id ? updated : c);
-        saveToStorage(newConns);
+        await saveToStorage(newConns);
       }
       return existing.id;
     }
@@ -302,7 +361,20 @@ export const ConnectionsPage: React.FC = () => {
             passwordEncrypted = password;
           }
         } else {
-          passwordEncrypted = password;
+          // In guest mode, use keyphrase-based encryption
+          const keyphrase = await getGuestEncryptionKeyphrase();
+          if (keyphrase) {
+            try {
+              const encrypted = encryptDataWithKeyphrase(password, keyphrase);
+              passwordEncrypted = JSON.stringify(encrypted);
+            } catch (error) {
+              console.error('Failed to encrypt password with keyphrase:', error);
+              passwordEncrypted = password;
+            }
+          } else {
+            // Fallback to plain text if keyphrase not available
+            passwordEncrypted = password;
+          }
         }
       } else {
         passwordEncrypted = password;
@@ -324,7 +396,7 @@ export const ConnectionsPage: React.FC = () => {
     };
 
     addConnection(newConnection);
-    saveToStorage([...connections, newConnection]);
+    await saveToStorage([...connections, newConnection]);
     return newConnection.id;
   };
 
@@ -370,9 +442,33 @@ export const ConnectionsPage: React.FC = () => {
           privateKeyEncrypted = formData.privateKey || editingConnection.privateKeyEncrypted;
         }
       } else {
-        // In guest mode, store as plain text
-        passwordEncrypted = formData.password || editingConnection.passwordEncrypted;
-        privateKeyEncrypted = formData.privateKey || editingConnection.privateKeyEncrypted;
+        // In guest mode, use keyphrase-based encryption
+        const keyphrase = await getGuestEncryptionKeyphrase();
+        if (keyphrase) {
+          try {
+            if (formData.authMethod === 'password' && formData.password) {
+              const encrypted = encryptDataWithKeyphrase(formData.password, keyphrase);
+              passwordEncrypted = JSON.stringify(encrypted);
+            } else {
+              passwordEncrypted = editingConnection.passwordEncrypted;
+            }
+            if (formData.authMethod === 'key' && formData.privateKey) {
+              const encrypted = encryptDataWithKeyphrase(formData.privateKey, keyphrase);
+              privateKeyEncrypted = JSON.stringify(encrypted);
+            } else {
+              privateKeyEncrypted = editingConnection.privateKeyEncrypted;
+            }
+          } catch (error) {
+            console.error('Failed to encrypt credentials with keyphrase:', error);
+            // Fallback to plain text
+            passwordEncrypted = formData.password || editingConnection.passwordEncrypted;
+            privateKeyEncrypted = formData.privateKey || editingConnection.privateKeyEncrypted;
+          }
+        } else {
+          // Fallback to plain text if keyphrase not available
+          passwordEncrypted = formData.password || editingConnection.passwordEncrypted;
+          privateKeyEncrypted = formData.privateKey || editingConnection.privateKeyEncrypted;
+        }
       }
 
       const updated: SSHConnection = {
@@ -388,7 +484,7 @@ export const ConnectionsPage: React.FC = () => {
       };
       updateConnection(editingConnection.id, updated);
       const newConns = connections.map(c => c.id === editingConnection.id ? updated : c);
-      saveToStorage(newConns);
+      await saveToStorage(newConns);
     } else {
       let passwordEncrypted: string | undefined;
       let privateKeyEncrypted: string | undefined;
@@ -418,9 +514,29 @@ export const ConnectionsPage: React.FC = () => {
           privateKeyEncrypted = formData.privateKey;
         }
       } else {
-        // In guest mode, store as plain text
-        passwordEncrypted = formData.password;
-        privateKeyEncrypted = formData.privateKey;
+        // In guest mode, use keyphrase-based encryption
+        const keyphrase = await getGuestEncryptionKeyphrase();
+        if (keyphrase) {
+          try {
+            if (formData.authMethod === 'password' && formData.password) {
+              const encrypted = encryptDataWithKeyphrase(formData.password, keyphrase);
+              passwordEncrypted = JSON.stringify(encrypted);
+            }
+            if (formData.authMethod === 'key' && formData.privateKey) {
+              const encrypted = encryptDataWithKeyphrase(formData.privateKey, keyphrase);
+              privateKeyEncrypted = JSON.stringify(encrypted);
+            }
+          } catch (error) {
+            console.error('Failed to encrypt credentials with keyphrase:', error);
+            // Fallback to plain text
+            passwordEncrypted = formData.password;
+            privateKeyEncrypted = formData.privateKey;
+          }
+        } else {
+          // Fallback to plain text if keyphrase not available
+          passwordEncrypted = formData.password;
+          privateKeyEncrypted = formData.privateKey;
+        }
       }
 
       const newConnection: SSHConnection = {
@@ -439,22 +555,22 @@ export const ConnectionsPage: React.FC = () => {
         updatedAt: now,
       };
       addConnection(newConnection);
-      saveToStorage([...connections, newConnection]);
+      await saveToStorage([...connections, newConnection]);
     }
     handleCloseModal();
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     deleteConnection(id);
     const newConns = connections.filter(c => c.id !== id);
-    saveToStorage(newConns);
+    await saveToStorage(newConns);
   };
 
-  const handleToggleFavorite = (connection: SSHConnection) => {
+  const handleToggleFavorite = async (connection: SSHConnection) => {
     const updated = { ...connection, isFavorite: !connection.isFavorite };
     updateConnection(connection.id, updated);
     const newConns = connections.map(c => c.id === connection.id ? updated : c);
-    saveToStorage(newConns);
+    await saveToStorage(newConns);
   };
 
   const handleCopyCommand = (conn: SSHConnection) => {
@@ -483,7 +599,7 @@ export const ConnectionsPage: React.FC = () => {
       if (hostKeyInfoResult) {
         try {
           const hostKeyInfo = await hostKeyInfoResult;
-          
+
           // If host is not known or there's a mismatch, show verification modal
           if (!hostKeyInfo.isKnown || hostKeyInfo.isMismatch) {
             setHostKeyVerificationInfo({
@@ -554,7 +670,7 @@ export const ConnectionsPage: React.FC = () => {
           hasPrivateKeyEncrypted: !!flowConnection.privateKeyEncrypted,
           isGuestMode,
         });
-        
+
         if (!isGuestMode) {
           const encryptionKey = localStorage.getItem('vault_encryption_key');
           if (encryptionKey && flowConnection.passwordEncrypted) {
@@ -576,10 +692,51 @@ export const ConnectionsPage: React.FC = () => {
             }
           }
         } else {
-          // In guest mode, passwords are stored as plain text
-          password = flowConnection.passwordEncrypted || '';
-          privateKey = flowConnection.privateKeyEncrypted || '';
-          console.log('[CONN] Using plain text credentials (guest mode), password length:', password.length);
+          // In guest mode, use keyphrase-based encryption
+          const keyphrase = await getGuestEncryptionKeyphrase();
+          if (keyphrase && flowConnection.passwordEncrypted) {
+            const passwordData = tryParseJSON(flowConnection.passwordEncrypted);
+            if (passwordData) {
+              // It's encrypted JSON data
+              try {
+                password = decryptDataWithKeyphrase(passwordData, keyphrase);
+                console.log('[CONN] Decrypted password using keyphrase, length:', password.length);
+              } catch (error) {
+                console.error('Failed to decrypt password with keyphrase:', error);
+                // Fallback to plain text for backward compatibility
+                password = flowConnection.passwordEncrypted || '';
+              }
+            } else {
+              // It's plain text (backward compatibility with old data)
+              password = flowConnection.passwordEncrypted;
+              console.log('[CONN] Using plain text password (not encrypted)');
+            }
+          } else if (flowConnection.passwordEncrypted) {
+            // Fallback: try as plain text (for backward compatibility with old data)
+            password = flowConnection.passwordEncrypted;
+          }
+
+          if (keyphrase && flowConnection.privateKeyEncrypted) {
+            const privateKeyData = tryParseJSON(flowConnection.privateKeyEncrypted);
+            if (privateKeyData) {
+              // It's encrypted JSON data
+              try {
+                privateKey = decryptDataWithKeyphrase(privateKeyData, keyphrase);
+                console.log('[CONN] Decrypted private key using keyphrase, length:', privateKey.length);
+              } catch (error) {
+                console.error('Failed to decrypt private key with keyphrase:', error);
+                // Fallback to plain text for backward compatibility
+                privateKey = flowConnection.privateKeyEncrypted || '';
+              }
+            } else {
+              // It's plain text (backward compatibility with old data)
+              privateKey = flowConnection.privateKeyEncrypted;
+              console.log('[CONN] Using plain text private key (not encrypted)');
+            }
+          } else if (flowConnection.privateKeyEncrypted) {
+            // Fallback: try as plain text (for backward compatibility with old data)
+            privateKey = flowConnection.privateKeyEncrypted;
+          }
         }
       }
 
@@ -589,8 +746,33 @@ export const ConnectionsPage: React.FC = () => {
         authMethod,
       });
 
+      // Check host key before connecting
+      const hostKeyInfoResult = getSSHHostKeyInfo(flowConnection.host, flowConnection.port);
+      if (hostKeyInfoResult) {
+        try {
+          const hostKeyInfo = await hostKeyInfoResult;
+          
+          // If host is not known or there's a mismatch, show verification modal
+          if (!hostKeyInfo.isKnown || hostKeyInfo.isMismatch) {
+            setHostKeyVerificationInfo({
+              host: flowConnection.host,
+              port: flowConnection.port,
+              connection: flowConnection,
+            });
+            setShowHostKeyVerification(true);
+            setIsConnecting(false);
+            setShowConnectionFlow(false);
+            return; // Wait for user to accept/reject
+          }
+        } catch (error) {
+          // If we can't get host key info, still try to connect
+          // (the backend will handle the verification)
+          console.warn('Failed to get host key info, proceeding with connection:', error);
+        }
+      }
+
       await createSSHTerminal(flowConnection.host, flowConnection.port, flowConnection.username, password, privateKey, flowConnection.name);
-      
+
       // Save credentials if provided
       if (authMethod === 'password' && credentials.password) {
         let passwordEncrypted: string | undefined;
@@ -608,7 +790,20 @@ export const ConnectionsPage: React.FC = () => {
             passwordEncrypted = credentials.password;
           }
         } else {
-          passwordEncrypted = credentials.password;
+          // In guest mode, use keyphrase-based encryption
+          const keyphrase = await getGuestEncryptionKeyphrase();
+          if (keyphrase) {
+            try {
+              const encrypted = encryptDataWithKeyphrase(credentials.password, keyphrase);
+              passwordEncrypted = JSON.stringify(encrypted);
+            } catch (error) {
+              console.error('Failed to encrypt password with keyphrase:', error);
+              passwordEncrypted = credentials.password;
+            }
+          } else {
+            // Fallback to plain text if keyphrase not available
+            passwordEncrypted = credentials.password;
+          }
         }
 
         const updated: SSHConnection = {
@@ -618,7 +813,7 @@ export const ConnectionsPage: React.FC = () => {
         };
         updateConnection(flowConnection.id, updated);
         const newConns = connections.map(c => c.id === flowConnection.id ? updated : c);
-        saveToStorage(newConns);
+        await saveToStorage(newConns);
       } else if ((authMethod === 'key' || authMethod === 'certificate') && credentials.privateKey) {
         let privateKeyEncrypted: string | undefined;
         if (!isGuestMode) {
@@ -645,7 +840,7 @@ export const ConnectionsPage: React.FC = () => {
         };
         updateConnection(flowConnection.id, updated);
         const newConns = connections.map(c => c.id === flowConnection.id ? updated : c);
-        saveToStorage(newConns);
+        await saveToStorage(newConns);
       }
 
       setIsConnecting(false);
@@ -661,6 +856,25 @@ export const ConnectionsPage: React.FC = () => {
       console.error('Failed to connect:', error);
       setIsConnecting(false);
       const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Check if error is due to host key not known
+      if (errorMessage.includes('host key not known')) {
+        // Show host key verification modal
+        setHostKeyVerificationInfo({
+          host: flowConnection.host,
+          port: flowConnection.port,
+          connection: flowConnection,
+        });
+        setShowHostKeyVerification(true);
+        setShowConnectionFlow(false);
+        setConnectingState({
+          connectionId: flowConnection.id,
+          error: null,
+          isRetrying: false,
+        });
+        return;
+      }
+      
       setConnectingState({
         connectionId: flowConnection.id,
         error: errorMessage,
@@ -692,14 +906,14 @@ export const ConnectionsPage: React.FC = () => {
         throw new Error('Wails bindings not available. Please run "wails dev" or "wails build"');
       }
       const hostKeyInfo = await hostKeyInfoResult;
-      
-      // Accept the host key
-      const acceptResult = acceptSSHHostKey(hostKeyVerificationInfo.host, hostKeyVerificationInfo.port, hostKeyInfo.keyBase64);
+
+      // Accept the host key (pass isGuestMode to determine if key should be persisted)
+      const acceptResult = acceptSSHHostKey(hostKeyVerificationInfo.host, hostKeyVerificationInfo.port, hostKeyInfo.keyBase64, isGuestMode);
       if (!acceptResult) {
         throw new Error('Wails bindings not available. Please run "wails dev" or "wails build"');
       }
       await acceptResult;
-      
+
       // Close host key modal and show connection flow
       // Get the latest connection from the store to ensure we have all fields including encrypted credentials
       const latestConnection = connections.find(c => c.id === hostKeyVerificationInfo.connection.id) || hostKeyVerificationInfo.connection;
@@ -756,7 +970,7 @@ export const ConnectionsPage: React.FC = () => {
   const handleQuickConnect = (username: string, host: string, port: number) => {
     setPendingConnection({ username, host, port });
     setIsConnecting(true);
-    
+
     createSSHTerminal(host, port, username, '', '')
       .then(() => {
         setIsConnecting(false);
@@ -787,7 +1001,7 @@ export const ConnectionsPage: React.FC = () => {
 
   const handlePasswordSubmit = (password: string) => {
     if (!pendingConnection) return;
-    
+
     setIsConnecting(true);
     createSSHTerminal(
       pendingConnection.host,
@@ -846,12 +1060,12 @@ export const ConnectionsPage: React.FC = () => {
       : connections;
 
     const data = JSON.stringify({ connections: connectionsToExport }, null, 2);
-    
+
     try {
       const defaultFilename = selectedConnectionIds.size > 0
         ? `ssh-connections-selected-${selectedConnectionIds.size}.json`
         : 'ssh-connections.json';
-      
+
       const filePath = await ShowSaveFileDialog('Export SSH Connections', defaultFilename, 'json');
       if (filePath) {
         await WriteFile(filePath, data);
@@ -889,7 +1103,7 @@ export const ConnectionsPage: React.FC = () => {
               }
             }
             setConnections(merged);
-            saveToStorage(merged);
+            await saveToStorage(merged);
           }
         } catch {
           console.error('Failed to import connections');
@@ -903,7 +1117,7 @@ export const ConnectionsPage: React.FC = () => {
   const selectionBox = getSelectionBox();
 
   return (
-    <div 
+    <div
       className="p-6 space-y-6 relative select-none"
       ref={containerRef}
       onMouseDown={handleMouseDown}
@@ -1209,6 +1423,7 @@ export const ConnectionsPage: React.FC = () => {
           isOpen={showHostKeyVerification}
           host={hostKeyVerificationInfo.host}
           port={hostKeyVerificationInfo.port}
+          isGuest={isGuestMode}
           onAccept={handleHostKeyAccept}
           onReject={handleHostKeyReject}
         />

@@ -70,19 +70,41 @@ func (khm *KnownHostsManager) GetHostKeyInfo(host string, port int) (*HostKeyInf
 	var keyType string
 	
 	config := &ssh.ClientConfig{
+		// Use a dummy user - SSH requires a username even if auth fails
+		User: "hostkey-check",
+		// This callback triggers as soon as the server presents its key
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			capturedKey = key
 			keyType = key.Type()
 			return nil
 		},
 		Timeout: 5 * time.Second,
+		// No auth methods - we only want the handshake, not full authentication
+		Auth: []ssh.AuthMethod{},
 	}
 
-	conn, err := ssh.Dial("tcp", addr, config)
+	// Dial the TCP connection manually
+	netConn, err := net.DialTimeout("tcp", addr, config.Timeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to get host key: %w", err)
+		return nil, fmt.Errorf("network connection failed: %w", err)
 	}
-	defer conn.Close()
+	defer netConn.Close()
+
+	// Perform the SSH handshake
+	// This will almost certainly return an error (no auth), but the callback 
+	// above will have already captured the key during the handshake phase.
+	sshConn, _, _, err := ssh.NewClientConn(netConn, addr, config)
+	if sshConn != nil {
+		defer sshConn.Close()
+	}
+
+	// Check if we captured the key (even if handshake/auth failed)
+	if capturedKey == nil {
+		if err != nil {
+			return nil, fmt.Errorf("could not capture host key during handshake: %w", err)
+		}
+		return nil, fmt.Errorf("could not capture host key during handshake")
+	}
 
 	// Calculate fingerprints
 	fingerprintSHA256 := sha256.Sum256(capturedKey.Marshal())
@@ -145,7 +167,9 @@ func (khm *KnownHostsManager) VerifyHostKey(host string, port int, remoteAddr ne
 }
 
 // AddHostKey adds a host key to known hosts
-func (khm *KnownHostsManager) AddHostKey(host string, port int, key ssh.PublicKey) error {
+// If isGuest is true, the key is only stored in memory for the current session
+// and not persisted to the filesystem (for privacy in guest mode)
+func (khm *KnownHostsManager) AddHostKey(host string, port int, key ssh.PublicKey, isGuest bool) error {
 	khm.mu.Lock()
 	defer khm.mu.Unlock()
 
@@ -164,7 +188,12 @@ func (khm *KnownHostsManager) AddHostKey(host string, port int, key ssh.PublicKe
 	hostKey := fmt.Sprintf("%s:%d", host, port)
 	khm.knownHosts[hostKey] = entry
 
-	// Save to file
+	// Only save to file if not in guest mode (for privacy)
+	if isGuest {
+		return nil
+	}
+
+	// Save to file for persistent storage
 	return khm.saveKnownHosts()
 }
 

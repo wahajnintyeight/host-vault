@@ -2,7 +2,10 @@ package main
 
 import (
 	"embed"
+	"log"
+	"os"
 
+	"github.com/joho/godotenv"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -13,6 +16,16 @@ import (
 var assets embed.FS
 
 func main() {
+	// Load .env file if it exists (optional - won't fail if file doesn't exist)
+	if _, err := os.Stat(".env"); err == nil {
+		// File exists, try to load it
+		if loadErr := godotenv.Load(); loadErr != nil {
+			log.Printf("Warning: Error loading .env file: %v", loadErr)
+			log.Printf("Make sure your .env file is UTF-8 encoded without BOM (Byte Order Mark)")
+		}
+	}
+	// If .env doesn't exist, silently continue (it's optional)
+
 	// Create an instance of the app structure
 	app := NewApp()
 

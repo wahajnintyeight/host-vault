@@ -87,6 +87,7 @@ type SSHSession struct {
 	keepAliveTicker *time.Ticker
 	done            chan struct{}
 	needsReplay     bool
+	bufferCloseOnce sync.Once
 }
 
 type ConnectionConfig struct {
@@ -238,6 +239,10 @@ func (s *SSHSession) readOutput(reader io.Reader) {
 					consecutiveErrors++
 					if consecutiveErrors >= maxConsecutiveErrors {
 						log.Printf("[SSH] Session %s disconnected due to %d consecutive read errors", s.id, consecutiveErrors)
+						// Close buffer to signal EOF to streamOutput
+						s.bufferCloseOnce.Do(func() {
+							close(s.buffer)
+						})
 						return
 					}
 					select {
@@ -247,6 +252,11 @@ func (s *SSHSession) readOutput(reader io.Reader) {
 					}
 					continue
 				}
+				// EOF detected - close buffer to signal streamOutput
+				log.Printf("[SSH] Session %s readOutput received EOF, closing buffer", s.id)
+				s.bufferCloseOnce.Do(func() {
+					close(s.buffer)
+				})
 				return
 			}
 
@@ -281,19 +291,21 @@ func (s *SSHSession) keepAlive() {
 		select {
 		case <-s.keepAliveTicker.C:
 			s.mu.RLock()
-			if s.closed {
+			if s.closed || s.session == nil {
 				s.mu.RUnlock()
 				log.Printf("[SSH] Keep-alive stopped for session %s (session closed)", s.id)
 				return
 			}
 
-			if s.session != nil {
-				_, err := s.session.SendRequest("keepalive@host-vault", true, nil)
-				if err != nil {
-					log.Printf("[SSH] Keep-alive failed for session %s: %v", s.id, err)
-				}
-			}
+			_, err := s.session.SendRequest("keepalive@host-vault", true, nil)
 			s.mu.RUnlock()
+			
+			if err != nil {
+				log.Printf("[SSH] Keep-alive failed for session %s: %v - closing session", s.id, err)
+				// Connection is dead, trigger cleanup
+				s.Close()
+				return
+			}
 
 		case <-s.done:
 			log.Printf("[SSH] Keep-alive stopped for session %s (done signal)", s.id)
@@ -347,11 +359,10 @@ func (s *SSHSession) Close() error {
 	close(s.done)
 	s.closeConnection()
 
-	select {
-	case <-s.buffer:
-	default:
+	// Ensure buffer is closed (only once)
+	s.bufferCloseOnce.Do(func() {
 		close(s.buffer)
-	}
+	})
 
 	return nil
 }

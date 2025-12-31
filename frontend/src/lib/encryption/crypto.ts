@@ -137,6 +137,60 @@ export function generateRandomKey(): string {
 }
 
 /**
+ * Derive encryption key from a keyphrase using PBKDF2
+ */
+export function deriveKeyFromKeyphrase(keyphrase: string, salt?: string): string {
+  // Generate salt if not provided, or parse hex string to WordArray
+  const saltToUse = salt
+    ? CryptoJS.enc.Hex.parse(salt)
+    : CryptoJS.lib.WordArray.random(128/8);
+  
+  // Derive key using PBKDF2 with 10000 iterations
+  const key = CryptoJS.PBKDF2(keyphrase, saltToUse, {
+    keySize: ENCRYPTION_CONFIG.KEY_LENGTH / 32, // 256 bits = 8 words (32 bits each)
+    iterations: 10000,
+  });
+  
+  return key.toString(CryptoJS.enc.Hex);
+}
+
+/**
+ * Encrypt data using a keyphrase (derives key internally)
+ */
+export function encryptDataWithKeyphrase(
+  data: string,
+  keyphrase: string
+): EncryptedData & { salt: string } {
+  // Generate salt for this encryption
+  const salt = CryptoJS.lib.WordArray.random(128/8).toString(CryptoJS.enc.Hex);
+  
+  // Derive key from keyphrase
+  const key = deriveKeyFromKeyphrase(keyphrase, salt);
+  
+  // Encrypt using derived key
+  const encrypted = encryptData(data, key);
+  
+  return {
+    ...encrypted,
+    salt: salt,
+  };
+}
+
+/**
+ * Decrypt data using a keyphrase (derives key internally)
+ */
+export function decryptDataWithKeyphrase(
+  encryptedData: EncryptedData & { salt: string },
+  keyphrase: string
+): string {
+  // Derive key from keyphrase using the salt from encrypted data
+  const key = deriveKeyFromKeyphrase(keyphrase, encryptedData.salt);
+  
+  // Decrypt using derived key
+  return decryptData(encryptedData, key);
+}
+
+/**
  * Web Crypto API wrapper (for true AES-GCM support when available)
  * Falls back to CryptoJS if Web Crypto API is not available
  */

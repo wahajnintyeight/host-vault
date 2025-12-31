@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import { v4 as uuid } from 'uuid';
+import { create } from "zustand";
+import { v4 as uuid } from "uuid";
 import {
   TerminalSession,
   TerminalTab,
@@ -9,7 +9,7 @@ import {
   SessionType,
   SessionMetadata,
   SessionState,
-} from '../types/terminal';
+} from "../types/terminal";
 import {
   CreateLocalTerminal,
   CreateSSHTerminal,
@@ -17,12 +17,12 @@ import {
   CloseTerminal,
   GetTerminalMetadata,
   ReconnectTerminal,
-} from '../../wailsjs/go/main/App';
-import { destroyTerminalInstance } from '../components/terminal/Terminal';
+} from "../../wailsjs/go/main/App";
+import { destroyTerminalInstance } from "../components/terminal/Terminal";
 
 // Check if Wails bindings are available
 const isWailsAvailable = (): boolean => {
-  return typeof window !== 'undefined' && window.go?.main?.App;
+  return typeof window !== "undefined" && window.go?.main?.App;
 };
 
 interface TerminalStore {
@@ -36,7 +36,10 @@ interface TerminalStore {
   // Session management
   addSession: (session: TerminalSession) => void;
   removeSession: (sessionId: string) => void;
-  updateSessionMetadata: (sessionId: string, metadata: Partial<SessionMetadata>) => void;
+  updateSessionMetadata: (
+    sessionId: string,
+    metadata: Partial<SessionMetadata>
+  ) => void;
   updateSessionState: (sessionId: string, state: SessionState) => void;
 
   // Tab management
@@ -48,16 +51,39 @@ interface TerminalStore {
   duplicateTab: (tabId: string) => Promise<void>;
 
   // Layout management
-  splitPane: (paneId: string, orientation: SplitOrientation, newSessionId: string) => void;
+  splitPane: (
+    paneId: string,
+    orientation: SplitOrientation,
+    newSessionId: string
+  ) => void;
   closePane: (paneId: string) => void;
   updatePaneSizes: (splitId: string, sizes: number[]) => void;
 
   // Terminal operations
   createLocalTerminal: (shell?: string, cwd?: string) => Promise<string>;
-  createSSHTerminal: (host: string, port: number, username: string, password: string, privateKey?: string, name?: string) => Promise<string>;
-  createQuickSSHTerminal: (username: string, host: string, port: number, password?: string) => Promise<string>;
+  createSSHTerminal: (
+    host: string,
+    port: number,
+    username: string,
+    password: string,
+    privateKey?: string,
+    name?: string
+  ) => Promise<string>;
+  createQuickSSHTerminal: (
+    username: string,
+    host: string,
+    port: number,
+    password?: string
+  ) => Promise<string>;
   closeTerminal: (sessionId: string) => Promise<void>;
-  reconnectTerminal: (sessionId: string, host: string, port: number, username: string, password: string, privateKey?: string) => Promise<void>;
+  reconnectTerminal: (
+    sessionId: string,
+    host: string,
+    port: number,
+    username: string,
+    password: string,
+    privateKey?: string
+  ) => Promise<void>;
   setConnecting: (sessionId: string | null) => void;
 
   // Cleanup
@@ -69,7 +95,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   sessions: new Map(),
   tabs: [],
   activeTabId: null,
-  layout: { id: 'root', sessionId: '' } as TerminalPane,
+  layout: { id: "root", sessionId: "" } as TerminalPane,
   connectingSessionId: null,
 
   // Session management
@@ -125,11 +151,16 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
   removeTab: (tabId) => {
     const state = get();
-    const tab = state.tabs.find(t => t.id === tabId);
+    const tab = state.tabs.find((t) => t.id === tabId);
     if (!tab) return;
 
-    console.log('[TERM] Removing tab:', tabId, 'session:', tab.sessionId);
-    const newTabs = state.tabs.filter(t => t.id !== tabId);
+    console.log("[TERM] Removing tab:", tabId, "session:", tab.sessionId);
+    
+    // Check if this is a local terminal
+    const session = state.sessions.get(tab.sessionId);
+    const isLocalTerminal = session?.type === SessionType.Local;
+    
+    const newTabs = state.tabs.filter((t) => t.id !== tabId);
 
     // Destroy the terminal instance when tab is closed
     destroyTerminalInstance(tab.sessionId);
@@ -137,7 +168,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     // Update active tab if needed
     let newActiveTabId = state.activeTabId;
     if (tabId === state.activeTabId && newTabs.length > 0) {
-      const currentIndex = state.tabs.findIndex(t => t.id === tabId);
+      const currentIndex = state.tabs.findIndex((t) => t.id === tabId);
       const nextTab = newTabs[Math.min(currentIndex, newTabs.length - 1)];
       newActiveTabId = nextTab.id;
     } else if (newTabs.length === 0) {
@@ -145,16 +176,36 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     }
 
     set({ tabs: newTabs, activeTabId: newActiveTabId });
+
+    // If this was the last local terminal, navigate to HOME
+    if (isLocalTerminal) {
+      const remainingLocalTabs = newTabs.filter((t) => {
+        const s = state.sessions.get(t.sessionId);
+        return s?.type === SessionType.Local;
+      });
+      
+      if (remainingLocalTabs.length === 0) {
+        // Check if we're currently on the terminal page
+        const currentPath = window.location.pathname;
+        if (currentPath === '/terminal' || currentPath.startsWith('/terminal')) {
+          // Use a small delay to ensure state is updated
+          setTimeout(() => {
+            // Dispatch a custom event that can be listened to by the router
+            window.dispatchEvent(new CustomEvent('navigate-to-home'));
+          }, 100);
+        }
+      }
+    }
   },
 
   setActiveTab: (tabId) => {
-    console.log('[TERM] Switching to tab:', tabId);
+    console.log("[TERM] Switching to tab:", tabId);
     set({ activeTabId: tabId });
   },
 
   updateTabTitle: (tabId, title) => {
     set((state) => ({
-      tabs: state.tabs.map(t => t.id === tabId ? { ...t, title } : t),
+      tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, title } : t)),
     }));
   },
 
@@ -169,11 +220,11 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
   duplicateTab: async (tabId) => {
     if (!isWailsAvailable()) {
-      console.error('Wails backend not available for duplicating terminal');
+      console.error("Wails backend not available for duplicating terminal");
       return;
     }
     const state = get();
-    const tab = state.tabs.find(t => t.id === tabId);
+    const tab = state.tabs.find((t) => t.id === tabId);
     if (!tab) return;
 
     const originalSession = state.sessions.get(tab.sessionId);
@@ -181,8 +232,8 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
     try {
       // Count existing duplicates to generate next number
-      const baseTitle = originalSession.title.replace(/ #\d+$/, ''); // Remove existing number if any
-      const duplicateCount = state.tabs.filter(t => {
+      const baseTitle = originalSession.title.replace(/ #\d+$/, ""); // Remove existing number if any
+      const duplicateCount = state.tabs.filter((t) => {
         const session = state.sessions.get(t.sessionId);
         return session?.title.startsWith(baseTitle);
       }).length;
@@ -192,17 +243,17 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         // For SSH, create a new connection with the same credentials
         const sshConfig = originalSession.metadata.sshConfig;
         if (!sshConfig) {
-          console.error('SSH config not found for session, cannot duplicate');
+          console.error("SSH config not found for session, cannot duplicate");
           return;
         }
-        
+
         // Use createSSHTerminal which handles the connecting overlay
         await get().createSSHTerminal(
           sshConfig.host,
           sshConfig.port,
           sshConfig.username,
           sshConfig.password,
-          sshConfig.privateKey || '',
+          sshConfig.privateKey || "",
           newTitle
         );
       } else {
@@ -226,30 +277,32 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         get().addTab(newTab);
       }
     } catch (error) {
-      console.error('Failed to duplicate terminal:', error);
+      console.error("Failed to duplicate terminal:", error);
     }
   },
 
   // Layout management
   splitPane: (paneId, orientation, newSessionId) => {
     // TODO: Implement split pane logic
-    console.log('Split pane:', paneId, orientation, newSessionId);
+    console.log("Split pane:", paneId, orientation, newSessionId);
   },
 
   closePane: (paneId) => {
     // TODO: Implement close pane logic
-    console.log('Close pane:', paneId);
+    console.log("Close pane:", paneId);
   },
 
   updatePaneSizes: (splitId, sizes) => {
     // TODO: Implement update pane sizes logic
-    console.log('Update pane sizes:', splitId, sizes);
+    console.log("Update pane sizes:", splitId, sizes);
   },
 
   // Terminal operations
-  createLocalTerminal: async (shell = '', cwd = '') => {
+  createLocalTerminal: async (shell = "", cwd = "") => {
     if (!isWailsAvailable()) {
-      throw new Error('Wails backend not available. Please restart the application.');
+      throw new Error(
+        "Wails backend not available. Please restart the application."
+      );
     }
     try {
       const sessionId = await CreateLocalTerminal(shell, cwd, {});
@@ -259,12 +312,12 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         type: SessionType.Local,
         metadata: {
           workingDirectory: cwd,
-          shell: shell || 'powershell',
+          shell: shell || "powershell",
           environment: {},
           createdAt: new Date().toISOString(),
           state: SessionState.Active,
         },
-        title: 'Local Terminal',
+        title: "Local Terminal",
       };
 
       get().addSession(session);
@@ -276,32 +329,53 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       };
 
       get().addTab(tab);
-      
+
       return sessionId;
     } catch (error) {
-      console.error('Failed to create local terminal:', error);
+      console.error("Failed to create local terminal:", error);
       throw error;
     }
   },
 
-  createSSHTerminal: async (host, port, username, password, privateKey = '', name = '') => {
+  createSSHTerminal: async (
+    host,
+    port,
+    username,
+    password,
+    privateKey = "",
+    name = ""
+  ) => {
     if (!isWailsAvailable()) {
-      throw new Error('Wails backend not available. Please restart the application.');
+      throw new Error(
+        "Wails backend not available. Please restart the application."
+      );
     }
     const tempId = `connecting-${uuid()}`;
     set({ connectingSessionId: tempId });
-    console.log('[TERM] Creating SSH terminal:', { host, port, username, name });
+    console.log("[TERM] Creating SSH terminal:", {
+      host,
+      port,
+      username,
+      name,
+      password,
+    });
 
     try {
-      const sessionId = await CreateSSHTerminal(host, port, username, password, privateKey);
-      console.log('[TERM] SSH terminal created with session ID:', sessionId);
+      const sessionId = await CreateSSHTerminal(
+        host,
+        port,
+        username,
+        password,
+        privateKey
+      );
+      console.log("[TERM] SSH terminal created with session ID:", sessionId);
 
       const session: TerminalSession = {
         id: sessionId,
         type: SessionType.SSH,
         metadata: {
-          workingDirectory: '',
-          shell: 'remote-shell',
+          workingDirectory: "",
+          shell: "remote-shell",
           environment: {},
           createdAt: new Date().toISOString(),
           state: SessionState.Active,
@@ -331,27 +405,42 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       return sessionId;
     } catch (error) {
       set({ connectingSessionId: null });
-      console.error('[TERM] Failed to create SSH terminal:', error);
+      console.error("[TERM] Failed to create SSH terminal:", error);
       throw error;
     }
   },
 
-  createQuickSSHTerminal: async (username, host, port, password = '') => {
+  createQuickSSHTerminal: async (username, host, port, password = "") => {
     if (!isWailsAvailable()) {
-      throw new Error('Wails backend not available. Please restart the application.');
+      throw new Error(
+        "Wails backend not available. Please restart the application."
+      );
     }
-    console.log('[TERM] Creating quick SSH terminal:', { host, port, username });
+    console.log("[TERM] Creating quick SSH terminal:", {
+      host,
+      port,
+      username,
+    });
 
     try {
-      const sessionId = await CreateSSHTerminal(host, port, username, password, '');
-      console.log('[TERM] Quick SSH terminal created with session ID:', sessionId);
+      const sessionId = await CreateSSHTerminal(
+        host,
+        port,
+        username,
+        password,
+        ""
+      );
+      console.log(
+        "[TERM] Quick SSH terminal created with session ID:",
+        sessionId
+      );
 
       const session: TerminalSession = {
         id: sessionId,
         type: SessionType.SSH,
         metadata: {
-          workingDirectory: '',
-          shell: 'remote-shell',
+          workingDirectory: "",
+          shell: "remote-shell",
           environment: {},
           createdAt: new Date().toISOString(),
           state: SessionState.Active,
@@ -378,7 +467,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
       return sessionId;
     } catch (error) {
-      console.error('[TERM] Failed to create quick SSH terminal:', error);
+      console.error("[TERM] Failed to create quick SSH terminal:", error);
       throw error;
     }
   },
@@ -389,7 +478,9 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
   closeTerminal: async (sessionId) => {
     if (!isWailsAvailable()) {
-      console.warn('Wails backend not available, removing session from state only');
+      console.warn(
+        "Wails backend not available, removing session from state only"
+      );
       get().removeSession(sessionId);
       return;
     }
@@ -397,19 +488,35 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       await CloseTerminal(sessionId);
       get().removeSession(sessionId);
     } catch (error) {
-      console.error('Failed to close terminal:', error);
+      console.error("Failed to close terminal:", error);
     }
   },
 
-  reconnectTerminal: async (sessionId, host, port, username, password, privateKey = '') => {
+  reconnectTerminal: async (
+    sessionId,
+    host,
+    port,
+    username,
+    password,
+    privateKey = ""
+  ) => {
     if (!isWailsAvailable()) {
-      throw new Error('Wails backend not available. Please restart the application.');
+      throw new Error(
+        "Wails backend not available. Please restart the application."
+      );
     }
     try {
-      await ReconnectTerminal(sessionId, host, port, username, password, privateKey);
+      await ReconnectTerminal(
+        sessionId,
+        host,
+        port,
+        username,
+        password,
+        privateKey
+      );
       get().updateSessionState(sessionId, SessionState.Active);
     } catch (error) {
-      console.error('Failed to reconnect terminal:', error);
+      console.error("Failed to reconnect terminal:", error);
       throw error;
     }
   },
@@ -419,7 +526,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       sessions: new Map(),
       tabs: [],
       activeTabId: null,
-      layout: { id: 'root', sessionId: '' } as TerminalPane,
+      layout: { id: "root", sessionId: "" } as TerminalPane,
     });
   },
 }));
