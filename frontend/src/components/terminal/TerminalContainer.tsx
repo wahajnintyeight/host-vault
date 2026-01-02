@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { useTerminalStore } from '../../store/terminalStore';
 import { TabBar } from './TabBar';
-import Terminal from './Terminal';
+import Terminal, { cleanupAllTerminalInstances } from './Terminal';
 import { SessionType, TerminalTab } from '../../types/terminal';
 import { QuickConnectModal } from '../connections/QuickConnectModal';
 import { PasswordPromptModal } from '../connections/PasswordPromptModal';
@@ -9,15 +9,10 @@ import { PasswordPromptModal } from '../connections/PasswordPromptModal';
 interface TerminalTabProps {
   tab: TerminalTab;
   activeTabId: string | null;
-  onClose: (tabId: string) => void;
 }
 
 const TerminalTabComponent = React.memo<TerminalTabProps>(
-  ({ tab, activeTabId, onClose }) => {
-    const handleClose = useCallback(() => {
-      onClose(tab.id);
-    }, [onClose, tab.id]);
-
+  ({ tab, activeTabId }) => {
     const isActive = tab.id === activeTabId;
 
     return (
@@ -25,7 +20,6 @@ const TerminalTabComponent = React.memo<TerminalTabProps>(
         <Terminal 
           sessionId={tab.sessionId}
           isVisible={isActive}
-          onClose={handleClose} 
         />
       </div>
     );
@@ -34,8 +28,7 @@ const TerminalTabComponent = React.memo<TerminalTabProps>(
     return (
       prev.tab.id === next.tab.id &&
       prev.tab.sessionId === next.tab.sessionId &&
-      prev.activeTabId === next.activeTabId &&
-      prev.onClose === next.onClose
+      prev.activeTabId === next.activeTabId
     );
   }
 );
@@ -70,16 +63,12 @@ export const TerminalContainer: React.FC = () => {
     console.log('[TERM] TerminalContainer component mounted');
     return () => {
       console.log('[TERM] TerminalContainer component unmounting');
+      // Cleanup all terminal instances when component unmounts
+      cleanupAllTerminalInstances();
     };
   }, []);
 
-  useEffect(() => {
-    if (tabs.length === 0) {
-      createLocalTerminal().catch((error) => {
-        console.error('Failed to initialize default terminal:', error);
-      });
-    }
-  }, [tabs.length, createLocalTerminal]);
+  // Removed automatic terminal creation - will navigate to home instead when last tab closes
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -264,10 +253,9 @@ export const TerminalContainer: React.FC = () => {
       <div className="flex-1 overflow-hidden relative">
         {tabs.map((tab) => (
           <TerminalTabComponent
-            key={tab.sessionId}
+            key={tab.id}
             tab={tab}
             activeTabId={activeTabId}
-            onClose={handleTerminalClose}
           />
         ))}
       </div>

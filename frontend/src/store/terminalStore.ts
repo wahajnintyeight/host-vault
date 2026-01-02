@@ -9,6 +9,7 @@ import {
   SessionType,
   SessionMetadata,
   SessionState,
+  TerminalClosedEvent,
 } from "../types/terminal";
 import {
   CreateLocalTerminal,
@@ -18,6 +19,7 @@ import {
   GetTerminalMetadata,
   ReconnectTerminal,
 } from "../../wailsjs/go/main/App";
+import { EventsOn } from "../../wailsjs/runtime/runtime";
 import { destroyTerminalInstance } from "../components/terminal/Terminal";
 
 // Check if Wails bindings are available
@@ -163,7 +165,26 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     const newTabs = state.tabs.filter((t) => t.id !== tabId);
 
     // Destroy the terminal instance when tab is closed
+    console.log("[TERM] Destroying terminal instance for session:", tab.sessionId);
     destroyTerminalInstance(tab.sessionId);
+
+    // Close the backend session (this is safe to call even if already closed)
+    if (isWailsAvailable()) {
+      console.log("[TERM] Calling CloseTerminal on backend for session:", tab.sessionId);
+      CloseTerminal(tab.sessionId)
+        .then(() => {
+          console.log("[TERM] Backend session closed successfully:", tab.sessionId);
+        })
+        .catch((err) => {
+          console.log("[TERM] Backend session already closed or error:", tab.sessionId, err);
+        });
+    } else {
+      console.warn("[TERM] Wails not available, skipping backend CloseTerminal call");
+    }
+
+    // Remove session from store
+    console.log("[TERM] Removing session from store:", tab.sessionId);
+    get().removeSession(tab.sessionId);
 
     // Update active tab if needed
     let newActiveTabId = state.activeTabId;
@@ -180,7 +201,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     // If this was the last local terminal, navigate to HOME
     if (isLocalTerminal) {
       const remainingLocalTabs = newTabs.filter((t) => {
-        const s = state.sessions.get(t.sessionId);
+        const s = get().sessions.get(t.sessionId);
         return s?.type === SessionType.Local;
       });
       
@@ -522,6 +543,11 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   },
 
   reset: () => {
+    // Cleanup all terminal instances before resetting state
+    import('../components/terminal/Terminal').then(({ cleanupAllTerminalInstances }) => {
+      cleanupAllTerminalInstances();
+    }).catch(console.error);
+
     set({
       sessions: new Map(),
       tabs: [],
@@ -530,6 +556,31 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     });
   },
 }));
+
+// Initialize global event listeners
+if (typeof window !== "undefined") {
+  EventsOn("terminal:closed", (event: TerminalClosedEvent) => {
+    console.log("[TERM] Received terminal:closed event for session:", event.SessionID);
+    const state = useTerminalStore.getState();
+    
+    // Find all tabs using this sessionId
+    const tabsToClose = state.tabs.filter(t => t.sessionId === event.SessionID);
+    
+    if (tabsToClose.length > 0) {
+      console.log(`[TERM] Closing ${tabsToClose.length} tabs for session:`, event.SessionID);
+      tabsToClose.forEach(tab => {
+        state.removeTab(tab.id);
+      });
+    } else {
+      console.log("[TERM] No tabs found for closed session:", event.SessionID);
+      // Still cleanup session if it exists but has no tabs
+      if (state.sessions.has(event.SessionID)) {
+        state.removeSession(event.SessionID);
+        destroyTerminalInstance(event.SessionID);
+      }
+    }
+  });
+}
 
 // Selectors
 export const useActiveSession = () =>

@@ -88,6 +88,12 @@ export const Header: React.FC = () => {
   
   const getSessionType = (sessionId: string) => sessions.get(sessionId)?.type;
 
+  // Check if there are any local terminal tabs open
+  const hasLocalTerminal = tabs.some(tab => {
+    const session = sessions.get(tab.sessionId);
+    return session?.type === 'local'; // Using string value instead of enum for safety
+  });
+
   // Open terminal button handler
   const handleOpenTerminal = async () => {
     if (tabs.length === 0) {
@@ -153,18 +159,20 @@ export const Header: React.FC = () => {
               getSessionType={getSessionType}
             />
           )}
-          {/* Always show "Open Terminal" button */}
-          <button
-            onClick={handleOpenTerminal}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium
-              text-text-secondary hover:text-text-primary
-              hover:bg-background rounded transition-colors duration-150
-              flex-shrink-0"
-            title="Open Terminal"
-          >
-            <Terminal size={14} />
-            <span>Open Terminal</span>
-          </button>
+          {/* Show "Open Terminal" button only when no local terminals are open */}
+          {!hasLocalTerminal && (
+            <button
+              onClick={handleOpenTerminal}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium
+                text-text-secondary hover:text-text-primary
+                hover:bg-background rounded transition-colors duration-150
+                flex-shrink-0"
+              title="Open Terminal"
+            >
+              <Terminal size={14} />
+              <span>Open Terminal</span>
+            </button>
+          )}
         </div>
       </div>
 

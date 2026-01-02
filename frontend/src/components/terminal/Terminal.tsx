@@ -31,16 +31,46 @@ interface TerminalInstance {
   resizeObserver: ResizeObserver | null;
   resizeTimeout: NodeJS.Timeout | null;
   onClose: (() => void) | null;
+  bufferSize: number; // Track buffer size to prevent excessive memory usage
 }
 
 const terminalInstances = new Map<string, TerminalInstance>();
 
+// Memory limits
+const MAX_OUTPUT_BUFFER_ITEMS = 1000; // Reduced from 10,000
+const MAX_OUTPUT_BUFFER_MEMORY = 10 * 1024 * 1024; // 10MB per terminal
+const MAX_TOTAL_TERMINAL_MEMORY = 100 * 1024 * 1024; // 100MB total for all terminals
+
 // Global event handlers - registered once, dispatch to correct instance
 let globalEventsRegistered = false;
+
+// Memory management for output buffers
+function manageOutputBuffer(instance: TerminalInstance, newData: string) {
+  instance.outputBuffer.push(newData);
+  instance.bufferSize += newData.length;
+
+  // If buffer exceeds memory limit, remove oldest entries
+  while (instance.bufferSize > MAX_OUTPUT_BUFFER_MEMORY || instance.outputBuffer.length > MAX_OUTPUT_BUFFER_ITEMS) {
+    if (instance.outputBuffer.length === 0) break;
+    const removed = instance.outputBuffer.shift();
+    if (removed) {
+      instance.bufferSize -= removed.length;
+    }
+  }
+}
 
 function registerGlobalEvents() {
   if (globalEventsRegistered) return;
   globalEventsRegistered = true;
+
+  // Periodic memory monitoring
+  setInterval(() => {
+    const totalMemory = getTotalTerminalMemoryUsage();
+    if (totalMemory > MAX_TOTAL_TERMINAL_MEMORY * 0.8) { // 80% threshold
+      console.warn(`[TERM] Terminal memory usage high: ${(totalMemory / 1024 / 1024).toFixed(2)}MB`);
+      cleanupExcessiveMemoryUsage();
+    }
+  }, 30000); // Check every 30 seconds
 
   EventsOn('terminal:output', (event: TerminalOutputEvent) => {
     const inst = terminalInstances.get(event.SessionID);
@@ -48,21 +78,8 @@ function registerGlobalEvents() {
       if (inst.isConsuming) {
         inst.term.write(event.Data);
       } else {
-        inst.outputBuffer.push(event.Data);
-        if (inst.outputBuffer.length > 10000) {
-          inst.outputBuffer = inst.outputBuffer.slice(-5000);
-        }
+        manageOutputBuffer(inst, event.Data);
       }
-    }
-  });
-
-  EventsOn('terminal:closed', (event: TerminalClosedEvent) => {
-    console.log('[TERM] Received terminal:closed event for session:', event.SessionID);
-    const inst = terminalInstances.get(event.SessionID);
-    console.log('[TERM] Found instance:', !!inst, 'has onClose:', !!inst?.onClose);
-    if (inst?.onClose) {
-      console.log('[TERM] Calling onClose for session:', event.SessionID);
-      inst.onClose();
     }
   });
 
@@ -71,7 +88,7 @@ function registerGlobalEvents() {
     if (inst) {
       const msg = '\r\n\x1b[31m[DISCONNECTED] Connection lost.\x1b[0m\r\n';
       if (inst.isConsuming) inst.term.write(msg);
-      else inst.outputBuffer.push(msg);
+      else manageOutputBuffer(inst, msg);
     }
   });
 
@@ -80,7 +97,7 @@ function registerGlobalEvents() {
     if (inst) {
       const msg = '\r\n\x1b[33m[RECONNECT] Use reconnect button.\x1b[0m\r\n';
       if (inst.isConsuming) inst.term.write(msg);
-      else inst.outputBuffer.push(msg);
+      else manageOutputBuffer(inst, msg);
     }
   });
 
@@ -89,7 +106,7 @@ function registerGlobalEvents() {
     if (inst) {
       const msg = '\r\n\x1b[32m[RECONNECTED] Connection restored.\x1b[0m\r\n';
       if (inst.isConsuming) inst.term.write(msg);
-      else inst.outputBuffer.push(msg);
+      else manageOutputBuffer(inst, msg);
     }
   });
 }
@@ -97,7 +114,6 @@ function registerGlobalEvents() {
 interface TerminalProps {
   sessionId: string;
   isVisible?: boolean;
-  onClose?: () => void;
 }
 
 export interface TerminalHandle {
@@ -112,19 +128,11 @@ const MIN_FONT_SIZE = 8;
 const MAX_FONT_SIZE = 32;
 const DEFAULT_FONT_SIZE = 14;
 
-const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, isVisible = true, onClose }, ref) => {
+const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, isVisible = true }, ref) => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
 
   const { config } = useUserConfigStore();
-
-  // Update onClose callback in instance when it changes
-  useEffect(() => {
-    const instance = terminalInstances.get(sessionId);
-    if (instance) {
-      instance.onClose = onClose || null;
-    }
-  }, [sessionId, onClose]);
 
   const getInstance = (): TerminalInstance | null => {
     return terminalInstances.get(sessionId) || null;
@@ -280,7 +288,6 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, isVisib
       // Reuse existing instance
       wrapperRef.current.appendChild(instance.container);
       instance.isConsuming = isVisible;
-      instance.onClose = onClose || null;
 
       setTimeout(() => {
         if (instance?.fitAddon) instance.fitAddon.fit();
@@ -336,11 +343,12 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, isVisib
       searchAddon,
       container,
       outputBuffer: [],
+      bufferSize: 0,
       isConsuming: isVisible,
       inputDisposable: null,
       resizeObserver: null,
       resizeTimeout: null,
-      onClose: onClose || null,
+      onClose: null,
     };
 
     newInstance.inputDisposable = term.onData((data) => {
@@ -393,20 +401,120 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, isVisib
 
 Terminal.displayName = 'Terminal';
 
+// Monitor total terminal memory usage
+export const getTotalTerminalMemoryUsage = (): number => {
+  let totalMemory = 0;
+  for (const instance of terminalInstances.values()) {
+    totalMemory += instance.bufferSize;
+    // Estimate memory usage for XTerm instance (rough approximation)
+    totalMemory += 1024 * 1024; // ~1MB per terminal instance
+  }
+  return totalMemory;
+};
+
+// Force cleanup if memory usage is too high
+export const cleanupExcessiveMemoryUsage = () => {
+  const totalMemory = getTotalTerminalMemoryUsage();
+  if (totalMemory > MAX_TOTAL_TERMINAL_MEMORY) {
+    console.warn(`[TERM] High terminal memory usage detected: ${(totalMemory / 1024 / 1024).toFixed(2)}MB. Cleaning up...`);
+
+    // Clear output buffers for non-visible terminals first
+    for (const instance of terminalInstances.values()) {
+      if (!instance.isConsuming && instance.outputBuffer.length > 100) {
+        instance.outputBuffer = instance.outputBuffer.slice(-50);
+        instance.bufferSize = instance.outputBuffer.reduce((sum, item) => sum + item.length, 0);
+      }
+    }
+
+    // If still high, clear all buffers
+    const newTotalMemory = getTotalTerminalMemoryUsage();
+    if (newTotalMemory > MAX_TOTAL_TERMINAL_MEMORY) {
+      console.warn(`[TERM] Memory usage still high after buffer cleanup. Clearing all buffers.`);
+      for (const instance of terminalInstances.values()) {
+        if (!instance.isConsuming) {
+          instance.outputBuffer = [];
+          instance.bufferSize = 0;
+        }
+      }
+    }
+  }
+};
+
 // Destroy terminal instance (call when tab is closed)
 export const destroyTerminalInstance = (sessionId: string) => {
   const instance = terminalInstances.get(sessionId);
   if (instance) {
-    if (instance.resizeTimeout) clearTimeout(instance.resizeTimeout);
-    if (instance.resizeObserver) instance.resizeObserver.disconnect();
-    if (instance.inputDisposable) instance.inputDisposable.dispose();
-    instance.term.dispose();
-    if (instance.container.parentNode) {
-      instance.container.parentNode.removeChild(instance.container);
+    console.log(`[TERM] Destroying terminal instance for session: ${sessionId}`);
+
+    // Clear timeouts and observers
+    if (instance.resizeTimeout) {
+      clearTimeout(instance.resizeTimeout);
+      instance.resizeTimeout = null;
     }
+    if (instance.resizeObserver) {
+      instance.resizeObserver.disconnect();
+      instance.resizeObserver = null;
+    }
+
+    // Dispose input handler
+    if (instance.inputDisposable) {
+      instance.inputDisposable.dispose();
+      instance.inputDisposable = null;
+    }
+
+    // Dispose terminal
+    try {
+      instance.term.dispose();
+    } catch (e) {
+      console.error(`[TERM] Error disposing terminal for session ${sessionId}:`, e);
+    }
+
+    // Remove from DOM
+    if (instance.container.parentNode) {
+      try {
+        instance.container.parentNode.removeChild(instance.container);
+      } catch (e) {
+        console.error(`[TERM] Error removing container for session ${sessionId}:`, e);
+      }
+    }
+
+    // Clear references
+    instance.outputBuffer = [];
+    instance.bufferSize = 0;
+
+    // Remove from instances map
     terminalInstances.delete(sessionId);
+
+    // Run memory cleanup
+    setTimeout(cleanupExcessiveMemoryUsage, 100);
   }
   // Note: We do NOT call EventsOff here - global handlers stay registered
 };
+
+// Cleanup all terminal instances (call on app unload)
+export const cleanupAllTerminalInstances = () => {
+  console.log(`[TERM] Cleaning up all ${terminalInstances.size} terminal instances`);
+
+  for (const sessionId of terminalInstances.keys()) {
+    destroyTerminalInstance(sessionId);
+  }
+
+  // Clear the map
+  terminalInstances.clear();
+
+  console.log('[TERM] All terminal instances cleaned up');
+};
+
+// Register cleanup on page unload
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    cleanupAllTerminalInstances();
+  });
+
+  // Also cleanup on React app unmount (if available)
+  window.addEventListener('unload', () => {
+    cleanupAllTerminalInstances();
+  });
+}
 
 export default React.memo(Terminal);

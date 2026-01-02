@@ -14,13 +14,13 @@ import (
 )
 
 type LocalPTYSession struct {
-	id       string
-	cpty     *conpty.ConPty
-	metadata SessionMetadata
-	mu       sync.RWMutex
-	closed   bool
-	buffer   chan []byte
-	done     chan struct{}
+	id              string
+	cpty            *conpty.ConPty
+	metadata        SessionMetadata
+	mu              sync.RWMutex
+	closed          bool
+	buffer          chan []byte
+	done            chan struct{}
 	bufferCloseOnce sync.Once
 }
 
@@ -69,10 +69,13 @@ func NewLocalPTYSession(shell, cwd string, env map[string]string) (*LocalPTYSess
 
 func (s *LocalPTYSession) readOutput() {
 	buf := make([]byte, 4096)
-	
+	zeroReadCount := 0
+	const maxZeroReads = 10 // After 10 consecutive zero reads (1 second), assume process exited
+
 	for {
 		select {
 		case <-s.done:
+			log.Printf("[LOCAL] Session %s readOutput received done signal, exiting", s.id)
 			return
 		default:
 			n, err := s.cpty.Read(buf)
@@ -80,16 +83,18 @@ func (s *LocalPTYSession) readOutput() {
 				if err != io.EOF {
 					// For non-EOF errors, check if it's a "broken pipe" or similar
 					// which indicates the process has exited
-					if err.Error() == "EOF" || 
-					   err.Error() == "read: The handle is invalid" ||
-					   err.Error() == "read: The pipe is being closed" {
+					if err.Error() == "EOF" ||
+						err.Error() == "read: The handle is invalid" ||
+						err.Error() == "read: The pipe is being closed" {
 						log.Printf("[LOCAL] Session %s readOutput detected process exit (error: %v), closing buffer", s.id, err)
 						s.bufferCloseOnce.Do(func() {
+							log.Printf("[LOCAL] Session %s closing buffer channel", s.id)
 							close(s.buffer)
 						})
 						return
 					}
 					// Log error but don't close immediately - might be recoverable
+					log.Printf("[LOCAL] Session %s readOutput non-fatal error: %v, retrying...", s.id, err)
 					select {
 					case <-time.After(100 * time.Millisecond):
 						// Brief pause before retry
@@ -101,11 +106,13 @@ func (s *LocalPTYSession) readOutput() {
 				// EOF detected - close buffer channel to signal streamOutput
 				log.Printf("[LOCAL] Session %s readOutput received EOF, closing buffer", s.id)
 				s.bufferCloseOnce.Do(func() {
+					log.Printf("[LOCAL] Session %s closing buffer channel", s.id)
 					close(s.buffer)
 				})
 				return
 			}
 			if n > 0 {
+				zeroReadCount = 0 // Reset counter on successful read
 				data := make([]byte, n)
 				copy(data, buf[:n])
 
@@ -118,7 +125,20 @@ func (s *LocalPTYSession) readOutput() {
 					return
 				}
 			} else if n == 0 {
-				// Zero-length read might indicate process exit on some systems
+				// Zero-length read might indicate process exit
+				zeroReadCount++
+				if zeroReadCount >= maxZeroReads {
+					// Too many zero reads - process likely exited
+					// When PowerShell exits, ConPTY may not immediately close the pipe,
+					// but we get zero-length reads. After multiple consecutive zeros,
+					// we assume the process has exited.
+					log.Printf("[LOCAL] Session %s readOutput detected %d consecutive zero reads, assuming process exited, closing buffer", s.id, zeroReadCount)
+					s.bufferCloseOnce.Do(func() {
+						log.Printf("[LOCAL] Session %s closing buffer channel", s.id)
+						close(s.buffer)
+					})
+					return
+				}
 				// Give it a brief moment and check again
 				select {
 				case <-time.After(100 * time.Millisecond):
@@ -167,9 +187,11 @@ func (s *LocalPTYSession) Close() error {
 	defer s.mu.Unlock()
 
 	if s.closed {
+		log.Printf("[LOCAL] Session %s already closed, skipping", s.id)
 		return nil
 	}
 
+	log.Printf("[LOCAL] Session %s closing...", s.id)
 	s.closed = true
 
 	// Signal readOutput goroutine to stop
@@ -177,6 +199,7 @@ func (s *LocalPTYSession) Close() error {
 
 	// Ensure buffer is closed (only once)
 	s.bufferCloseOnce.Do(func() {
+		log.Printf("[LOCAL] Session %s closing buffer channel in Close()", s.id)
 		close(s.buffer)
 	})
 
@@ -184,6 +207,7 @@ func (s *LocalPTYSession) Close() error {
 		s.cpty.Close()
 	}
 
+	log.Printf("[LOCAL] Session %s closed successfully", s.id)
 	return nil
 }
 
@@ -196,6 +220,7 @@ func (s *LocalPTYSession) GetMetadata() SessionMetadata {
 func (s *LocalPTYSession) ReadOutput() []byte {
 	data, ok := <-s.buffer
 	if !ok {
+		log.Printf("[LOCAL] Session %s ReadOutput received nil (buffer closed), returning nil to trigger terminal:closed", s.id)
 		return nil
 	}
 	return data

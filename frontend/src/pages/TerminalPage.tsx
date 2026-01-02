@@ -21,12 +21,6 @@ const TerminalWrapper = memo<TerminalWrapperProps>(({ sessionId, isActive, isDra
   // Get store actions directly - these are stable references
   const store = useTerminalStore;
 
-  const handleClose = useCallback(() => {
-    const state = store.getState();
-    const tab = state.tabs.find((t) => t.sessionId === sessionId);
-    if (tab) state.removeTab(tab.id);
-  }, [sessionId]);
-
   const handleRef = useCallback((handle: TerminalHandle | null) => {
     onTerminalRef(sessionId, handle);
   }, [sessionId, onTerminalRef]);
@@ -45,7 +39,6 @@ const TerminalWrapper = memo<TerminalWrapperProps>(({ sessionId, isActive, isDra
         ref={handleRef}
         sessionId={sessionId}
         isVisible={isActive}
-        onClose={handleClose}
       />
     </div>
   );
@@ -109,14 +102,7 @@ export const TerminalPage: React.FC = () => {
     };
   }, [navigate]);
 
-  // Initialize with one default local terminal if no tabs exist
-  useEffect(() => {
-    if (tabs.length === 0) {
-      createLocalTerminal().catch((error) => {
-        console.error('Failed to initialize default terminal:', error);
-      });
-    }
-  }, [tabs.length, createLocalTerminal]);
+  // Removed automatic terminal creation - will navigate to home instead when last tab closes
 
   // Keyboard shortcut to toggle drawer (Ctrl+Shift+F)
   useEffect(() => {

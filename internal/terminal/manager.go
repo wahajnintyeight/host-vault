@@ -9,15 +9,15 @@ import (
 	"path/filepath"
 	"sync"
 
-	"golang.org/x/crypto/ssh"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"golang.org/x/crypto/ssh"
 )
 
 type TerminalManager struct {
-	sessions        map[string]Session
-	mu              sync.RWMutex
-	ctx             context.Context
-	knownHostsMgr   *KnownHostsManager
+	sessions      map[string]Session
+	mu            sync.RWMutex
+	ctx           context.Context
+	knownHostsMgr *KnownHostsManager
 }
 
 func NewTerminalManager(ctx context.Context) *TerminalManager {
@@ -35,7 +35,7 @@ func NewTerminalManager(ctx context.Context) *TerminalManager {
 		}
 	}
 	appPath := filepath.Join(appDataPath, "host-vault")
-	
+
 	knownHostsMgr, err := NewKnownHostsManager(appPath)
 	if err != nil {
 		log.Printf("[TERM] Failed to initialize known hosts manager: %v", err)
@@ -98,19 +98,19 @@ func (tm *TerminalManager) AcceptHostKey(host string, port int, keyBase64 string
 	if tm.knownHostsMgr == nil {
 		return fmt.Errorf("known hosts manager not initialized")
 	}
-	
+
 	// Decode base64 key
 	keyBytes, err := base64.StdEncoding.DecodeString(keyBase64)
 	if err != nil {
 		return fmt.Errorf("failed to decode key: %w", err)
 	}
-	
+
 	// Parse the public key
 	key, err := ssh.ParsePublicKey(keyBytes)
 	if err != nil {
 		return fmt.Errorf("failed to parse public key: %w", err)
 	}
-	
+
 	return tm.knownHostsMgr.AddHostKey(host, port, key, isGuest)
 }
 
@@ -157,21 +157,24 @@ func (tm *TerminalManager) ResizeSession(sessionID string, cols, rows int) error
 }
 
 func (tm *TerminalManager) CloseSession(sessionID string) error {
-	log.Printf("[TERM] Closing session %s", sessionID)
+	log.Printf("[TERM] CloseSession called for session %s", sessionID)
 	tm.mu.Lock()
 	session, exists := tm.sessions[sessionID]
 	if exists {
+		log.Printf("[TERM] Removing session %s from sessions map", sessionID)
 		delete(tm.sessions, sessionID)
 	}
 	tm.mu.Unlock()
 
 	if !exists {
-		log.Printf("[TERM] Session %s not found for closing", sessionID)
+		log.Printf("[TERM] Session %s not found for closing (may already be closed)", sessionID)
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 
+	log.Printf("[TERM] Calling Close() on session %s", sessionID)
 	err := session.Close()
 
+	log.Printf("[TERM] Emitting terminal:closed event for session %s", sessionID)
 	runtime.EventsEmit(tm.ctx, "terminal:closed", TerminalClosedEvent{
 		SessionID: sessionID,
 	})
