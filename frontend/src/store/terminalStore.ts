@@ -198,23 +198,16 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
     set({ tabs: newTabs, activeTabId: newActiveTabId });
 
-    // If this was the last local terminal, navigate to HOME
-    if (isLocalTerminal) {
-      const remainingLocalTabs = newTabs.filter((t) => {
-        const s = get().sessions.get(t.sessionId);
-        return s?.type === SessionType.Local;
-      });
-      
-      if (remainingLocalTabs.length === 0) {
-        // Check if we're currently on the terminal page
-        const currentPath = window.location.pathname;
-        if (currentPath === '/terminal' || currentPath.startsWith('/terminal')) {
-          // Use a small delay to ensure state is updated
-          setTimeout(() => {
-            // Dispatch a custom event that can be listened to by the router
-            window.dispatchEvent(new CustomEvent('navigate-to-home'));
-          }, 100);
-        }
+    // If this was the last tab (of any type), navigate to HOME
+    if (newTabs.length === 0) {
+      // Check if we're currently on the terminal page
+      const currentPath = window.location.pathname;
+      if (currentPath === '/terminal' || currentPath.startsWith('/terminal')) {
+        // Use a small delay to ensure state is updated
+        setTimeout(() => {
+          // Dispatch a custom event that can be listened to by the router
+          window.dispatchEvent(new CustomEvent('navigate-to-home'));
+        }, 100);
       }
     }
   },

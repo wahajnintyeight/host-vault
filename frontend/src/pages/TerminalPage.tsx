@@ -157,13 +157,12 @@ export const TerminalPage: React.FC = () => {
           />
         ))}
 
-        {/* Fallback empty state (should rarely be seen due to auto-initialization) */}
+        {/* No terminals open - will auto-redirect to home */}
         {allSessionIds.length === 0 && !isConnecting && (
           <div className="flex items-center justify-center h-full text-text-muted">
             <div className="text-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
-              <p className="text-xs text-text-muted/70">
-                Initializing terminal...
+              <p className="text-sm text-text-muted/70">
+                No active terminals
               </p>
             </div>
           </div>

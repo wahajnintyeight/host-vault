@@ -3,6 +3,7 @@
 package terminal
 
 import (
+	"context"
 	"io"
 	"log"
 	"os"
@@ -63,8 +64,30 @@ func NewLocalPTYSession(shell, cwd string, env map[string]string) (*LocalPTYSess
 	}
 
 	go session.readOutput()
+	go session.waitForExit()
 
 	return session, nil
+}
+
+// waitForExit waits for the process to exit and closes the buffer
+func (s *LocalPTYSession) waitForExit() {
+	log.Printf("[LOCAL] Session %s starting waitForExit goroutine", s.id)
+
+	// Wait for the process to exit
+	exitCode, err := s.cpty.Wait(context.Background())
+
+	if err != nil {
+		log.Printf("[LOCAL] Session %s Wait error: %v", s.id, err)
+	} else {
+		log.Printf("[LOCAL] Session %s process exited with code: %d", s.id, exitCode)
+	}
+
+	// Close the buffer to signal that output has ended
+	// This will cause ReadOutput to return nil, triggering terminal:closed event
+	s.bufferCloseOnce.Do(func() {
+		log.Printf("[LOCAL] Session %s closing buffer channel from waitForExit", s.id)
+		close(s.buffer)
+	})
 }
 
 func (s *LocalPTYSession) readOutput() {
@@ -149,7 +172,6 @@ func (s *LocalPTYSession) readOutput() {
 		}
 	}
 }
-
 
 func (s *LocalPTYSession) ID() string {
 	return s.id

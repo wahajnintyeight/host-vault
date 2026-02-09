@@ -94,10 +94,15 @@ export const Header: React.FC = () => {
     return session?.type === 'local'; // Using string value instead of enum for safety
   });
 
-  // Open terminal button handler
+  const hasSSHTerminal = tabs.some(tab => {
+    const session = sessions.get(tab.sessionId);
+    return session?.type === 'ssh'; // Using string value instead of enum for safety
+  });
+
+  // Open terminal button handler - creates a local terminal when clicked
   const handleOpenTerminal = async () => {
-    if (tabs.length === 0) {
-      // Create a new terminal if none exist
+    if (!hasLocalTerminal) {
+      // Create a new local terminal if none exist
       try {
         await createLocalTerminal();
       } catch (error) {
