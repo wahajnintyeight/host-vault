@@ -3,6 +3,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SearchAddon } from '@xterm/addon-search';
+
 import '@xterm/xterm/css/xterm.css';
 import {
   TerminalOutputEvent,
@@ -14,6 +15,7 @@ import { WriteToTerminal, ResizeTerminal } from '../../../wailsjs/go/main/App';
 import { EventsOn, EventsOff, ClipboardGetText, ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 import { getTerminalThemeFromCSS } from '../../lib/terminalTheme';
 import { useUserConfigStore } from '../../store/userConfigStore';
+import { useClipboardHistoryStore } from '../../store/clipboardHistoryStore';
 
 const isWailsAvailable = (): boolean => {
   return typeof window !== 'undefined' && window.go?.main?.App;
@@ -35,6 +37,12 @@ interface TerminalInstance {
 }
 
 const terminalInstances = new Map<string, TerminalInstance>();
+
+// Track paste operations to prevent double-pasting
+let justPasted = false;
+let pasteTimeout: NodeJS.Timeout | null = null;
+let lastPastedContent = '';
+let lastPasteTime = 0;
 
 // Memory limits
 const MAX_OUTPUT_BUFFER_ITEMS = 1000; // Reduced from 10,000
@@ -218,89 +226,6 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, isVisib
   // Track if terminal has focus
   const [hasFocus, setHasFocus] = useState(false);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = async (e: KeyboardEvent) => {
-      const instance = getInstance();
-      if (!instance) return;
-      
-      // Check if event originated from this terminal's container or its children
-      const target = e.target as HTMLElement;
-      const isInThisTerminal = wrapperRef.current?.contains(target) || 
-                               instance.container.contains(target) ||
-                               instance.term.element?.contains(target) ||
-                               hasFocus;
-      
-      if (!isInThisTerminal) return;
-      
-      // Check for copy shortcuts (Ctrl+Shift+C or Cmd+Shift+C on Mac)
-      const isCopyShortcut = (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'C' || e.key === 'c');
-      const isPasteShortcut = (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'V' || e.key === 'v');
-      
-      // Handle copy
-      if (isCopyShortcut) {
-        e.preventDefault();
-        const selection = instance.term.getSelection();
-        console.log('[TERM] Copy shortcut detected, selection:', selection ? `${selection.length} chars` : 'none');
-        if (selection) {
-          try {
-            // Try Wails clipboard first
-            if (typeof ClipboardSetText === 'function') {
-              await ClipboardSetText(selection);
-              console.log('[TERM] Copied to clipboard via Wails');
-            } else {
-              // Fallback to browser clipboard
-              await navigator.clipboard.writeText(selection);
-              console.log('[TERM] Copied to clipboard via browser API');
-            }
-          } catch (error) {
-            console.error('[TERM] Failed to copy:', error);
-          }
-        }
-        return;
-      }
-      
-      // Handle paste
-      if (isPasteShortcut) {
-        e.preventDefault();
-        console.log('[TERM] Paste shortcut detected');
-        try {
-          let text = '';
-          // Try Wails clipboard first
-          if (typeof ClipboardGetText === 'function') {
-            text = await ClipboardGetText();
-            console.log('[TERM] Got text from Wails clipboard');
-          } else {
-            // Fallback to browser clipboard
-            text = await navigator.clipboard.readText();
-            console.log('[TERM] Got text from browser clipboard');
-          }
-          if (text && isWailsAvailable()) {
-            console.log('[TERM] Pasting text to terminal');
-            WriteToTerminal(sessionId, text).catch(console.error);
-          }
-        } catch (error) {
-          console.error('[TERM] Failed to paste:', error);
-        }
-        return;
-      }
-      
-      // Font size controls
-      if (e.ctrlKey && (e.key === '+' || e.key === '=')) {
-        e.preventDefault();
-        setFontSize((prev) => Math.min(MAX_FONT_SIZE, prev + 1));
-      } else if (e.ctrlKey && e.key === '-') {
-        e.preventDefault();
-        setFontSize((prev) => Math.max(MIN_FONT_SIZE, prev - 1));
-      } else if (e.ctrlKey && e.key === '0') {
-        e.preventDefault();
-        setFontSize(DEFAULT_FONT_SIZE);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [sessionId, hasFocus]);
-
   // Font size changes
   useEffect(() => {
     const instance = getInstance();
@@ -385,6 +310,8 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, isVisib
       scrollOnUserInput: true,
     });
 
+
+
     const fitAddon = new FitAddon();
     const webLinksAddon = new WebLinksAddon();
     const searchAddon = new SearchAddon();
@@ -417,8 +344,70 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, isVisib
       onClose: null,
     };
 
+    // Intercept ALL paste events to prevent xterm's built-in paste handling
+    const interceptPaste = (e: ClipboardEvent) => {
+      // Always prevent the default paste behavior - we handle it manually
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      
+      console.log('[TERM] Paste event intercepted');
+      
+      // Get the pasted text
+      const text = e.clipboardData?.getData('text');
+      if (!text || !isWailsAvailable()) return;
+      
+      const now = Date.now();
+      
+      // Check if this is a duplicate paste (same content within 500ms)
+      if (text === lastPastedContent && now - lastPasteTime < 500) {
+        console.log('[TERM] Ignoring duplicate paste event');
+        return;
+      }
+      
+      // Track this paste
+      lastPastedContent = text;
+      lastPasteTime = now;
+      justPasted = true;
+      
+      // Clear the flag after a delay
+      if (pasteTimeout) clearTimeout(pasteTimeout);
+      pasteTimeout = setTimeout(() => {
+        justPasted = false;
+      }, 500);
+      
+      // Send to terminal
+      console.log('[TERM] Sending paste to terminal');
+      WriteToTerminal(sessionId, text).catch(console.error);
+    };
+    
+    // Use capture phase to intercept before xterm sees it
+    container.addEventListener('paste', interceptPaste, true);
+
     newInstance.inputDisposable = term.onData((data) => {
       if (isWailsAvailable()) {
+        // Skip if we just performed a paste operation (prevents double paste)
+        if (justPasted) {
+          console.log('[TERM] Skipping onData during paste operation');
+          return;
+        }
+        
+        // Also check if this data matches what we just pasted
+        const now = Date.now();
+        if (data === lastPastedContent && now - lastPasteTime < 500) {
+          console.log('[TERM] Skipping duplicate paste data in onData');
+          return;
+        }
+        
+        // Check if this looks like a paste (multi-line or long text)
+        if (data.length > 10 || data.includes('\n') || data.includes('\r')) {
+          // This might be a paste that slipped through - check timing
+          if (now - lastPasteTime < 1000) {
+            console.log('[TERM] Skipping potential duplicate paste in onData');
+            return;
+          }
+        }
+        
         WriteToTerminal(sessionId, data).catch(console.error);
       }
     });
@@ -448,7 +437,88 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, isVisib
     newInstance.resizeObserver.observe(container);
     terminalInstances.set(sessionId, newInstance);
 
+    // Handle copy/paste keyboard shortcuts at the xterm.js level
+    // This must be done after the terminal is created and instance is stored
+    term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      // Check for copy shortcuts (Ctrl+Shift+C or Cmd+Shift+C on Mac)
+      const isCopyShortcut = (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'C' || e.key === 'c');
+      const isPasteShortcut = (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'V' || e.key === 'v');
+      
+      if (isCopyShortcut) {
+        e.preventDefault();
+        const selection = term.getSelection();
+        console.log('[TERM] Copy shortcut detected via xterm handler, selection:', selection ? `${selection.length} chars` : 'none');
+        if (selection) {
+          // Use clipboard API directly
+          navigator.clipboard.writeText(selection).then(() => {
+            console.log('[TERM] Copied to clipboard');
+            useClipboardHistoryStore.getState().addItem(selection, 'terminal');
+          }).catch((error) => {
+            console.error('[TERM] Failed to copy:', error);
+          });
+        }
+        return false; // Prevent xterm.js from processing this key
+      }
+      
+      if (isPasteShortcut) {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('[TERM] Paste shortcut detected via xterm handler');
+        
+        const now = Date.now();
+        
+        // Prevent rapid duplicate pastes
+        if (now - lastPasteTime < 300) {
+          console.log('[TERM] Ignoring rapid duplicate paste shortcut');
+          return false;
+        }
+        
+        navigator.clipboard.readText().then((text) => {
+          if (text && isWailsAvailable()) {
+            console.log('[TERM] Pasting text to terminal via keyboard shortcut');
+            
+            // Track what we're pasting and when
+            lastPastedContent = text;
+            lastPasteTime = Date.now();
+            
+            // Set flag to prevent onData from also sending the paste
+            justPasted = true;
+            if (pasteTimeout) clearTimeout(pasteTimeout);
+            
+            WriteToTerminal(sessionId, text).catch(console.error);
+            
+            // Clear the flag after a delay
+            pasteTimeout = setTimeout(() => {
+              justPasted = false;
+            }, 500);
+          }
+        }).catch((error) => {
+          console.error('[TERM] Failed to paste:', error);
+        });
+        return false; // Prevent xterm.js from processing this key
+      }
+      
+      // Font size controls
+      if (e.ctrlKey && (e.key === '+' || e.key === '=')) {
+        e.preventDefault();
+        setFontSize((prev) => Math.min(MAX_FONT_SIZE, prev + 1));
+        return false;
+      } else if (e.ctrlKey && e.key === '-') {
+        e.preventDefault();
+        setFontSize((prev) => Math.max(MIN_FONT_SIZE, prev - 1));
+        return false;
+      } else if (e.ctrlKey && e.key === '0') {
+        e.preventDefault();
+        setFontSize(DEFAULT_FONT_SIZE);
+        return false;
+      }
+      
+      return true; // Allow xterm.js to process other keys
+    });
+
     return () => {
+      if (pasteTimeout) clearTimeout(pasteTimeout);
+      container.removeEventListener('paste', interceptPaste, true);
       if (container.parentNode) {
         container.parentNode.removeChild(container);
       }
@@ -505,6 +575,8 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, isVisib
           } else {
             await navigator.clipboard.writeText(selection);
           }
+          // Track in clipboard history
+          useClipboardHistoryStore.getState().addItem(selection, 'terminal');
         } catch (error) {
           console.error('Failed to copy:', error);
         }
@@ -520,7 +592,15 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, isVisib
           text = await navigator.clipboard.readText();
         }
         if (text && isWailsAvailable()) {
+          // Track this paste to prevent duplicates
+          lastPastedContent = text;
+          lastPasteTime = Date.now();
+          justPasted = true;
+          if (pasteTimeout) clearTimeout(pasteTimeout);
           WriteToTerminal(sessionId, text).catch(console.error);
+          pasteTimeout = setTimeout(() => {
+            justPasted = false;
+          }, 500);
         }
       } catch (error) {
         console.error('Failed to paste:', error);

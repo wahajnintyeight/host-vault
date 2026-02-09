@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Code2, X, ChevronUp, ChevronDown, Plus, Play, Trash2, Edit2, Check, Loader2, GripVertical } from 'lucide-react';
+import { Search, Code2, Clipboard, X, ChevronUp, ChevronDown, Plus, Play, Trash2, Edit2, Check, Loader2, GripVertical, Copy, Trash } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { TerminalHandle } from './Terminal';
 import { useSnippetsStore, Snippet } from '../../store/snippetsStore';
+import { useClipboardHistoryStore } from '../../store/clipboardHistoryStore';
 
 interface TerminalDrawerProps {
   isOpen: boolean;
@@ -12,7 +13,7 @@ interface TerminalDrawerProps {
   terminalRef: React.RefObject<TerminalHandle>;
 }
 
-type TabType = 'search' | 'commands';
+type TabType = 'search' | 'commands' | 'clipboard';
 
 export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
   isOpen,
@@ -29,6 +30,26 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newCommand, setNewCommand] = useState({ name: '', command: '', description: '' });
   const [commandSearch, setCommandSearch] = useState('');
+
+  // Clipboard history state
+  const { items: clipboardItems, removeItem: removeClipboardItem, clearHistory: clearClipboardHistory, getRecentItems } = useClipboardHistoryStore();
+  const [clipboardSearch, setClipboardSearch] = useState('');
+  const [filteredClipboardItems, setFilteredClipboardItems] = useState(clipboardItems);
+
+  // Filter clipboard items based on search
+  useEffect(() => {
+    if (!clipboardSearch.trim()) {
+      setFilteredClipboardItems(getRecentItems());
+    } else {
+      const searchLower = clipboardSearch.toLowerCase();
+      setFilteredClipboardItems(
+        clipboardItems.filter(item => 
+          item.content.toLowerCase().includes(searchLower) && 
+          item.timestamp > Date.now() - 15 * 24 * 60 * 60 * 1000
+        )
+      );
+    }
+  }, [clipboardSearch, clipboardItems, getRecentItems]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -121,6 +142,39 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
     setNewCommand({ name: '', command: '', description: '' });
   };
 
+  // Clipboard handlers
+  const handleClipboardItemClick = (content: string) => {
+    terminalRef.current?.writeCommand(content);
+  };
+
+  const handleCopyToClipboard = async (content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error);
+    }
+  };
+
+  const formatTimestamp = (timestamp: number) => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays === 1) return 'Yesterday';
+    return `${diffDays} days ago`;
+  };
+
+  const truncateContent = (content: string, maxLength: number = 100) => {
+    if (content.length <= maxLength) return content;
+    return content.substring(0, maxLength) + '...';
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -148,6 +202,17 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
           >
             <Code2 className="w-3.5 h-3.5 inline mr-1.5" />
             Commands
+          </button>
+          <button
+            onClick={() => setActiveTab('clipboard')}
+            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+              activeTab === 'clipboard'
+                ? 'bg-primary/20 text-primary'
+                : 'text-text-secondary hover:text-text-primary hover:bg-background-lighter'
+            }`}
+          >
+            <Clipboard className="w-3.5 h-3.5 inline mr-1.5" />
+            Clipboard
           </button>
         </div>
         <button
@@ -320,6 +385,90 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
                 ))
               )}
             </div>
+          </div>
+        )}
+
+        {activeTab === 'clipboard' && (
+          <div className="space-y-3">
+            {/* Clipboard Search */}
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
+              <input
+                type="text"
+                value={clipboardSearch}
+                onChange={(e) => setClipboardSearch(e.target.value)}
+                placeholder="Search clipboard history..."
+                className="w-full pl-8 pr-3 py-1.5 text-xs bg-background border border-border rounded text-text-primary placeholder-text-muted focus:outline-none focus:border-primary"
+              />
+            </div>
+
+            {/* Clear History Button */}
+            {filteredClipboardItems.length > 0 && (
+              <button
+                onClick={() => {
+                  if (confirm('Clear all clipboard history?')) {
+                    clearClipboardHistory();
+                  }
+                }}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs border border-dashed border-danger/50 rounded text-danger/70 hover:border-danger hover:text-danger transition-colors"
+              >
+                <Trash className="w-3.5 h-3.5" />
+                Clear History
+              </button>
+            )}
+
+            {/* Clipboard Items List */}
+            <div className="space-y-2">
+              {filteredClipboardItems.length === 0 ? (
+                <div className="text-center py-8">
+                  <Clipboard className="w-8 h-8 text-text-muted mx-auto mb-2" />
+                  <p className="text-xs text-text-muted">
+                    {clipboardSearch ? 'No clipboard items match your search.' : 'No clipboard history yet. Copy something in the terminal!'}
+                  </p>
+                </div>
+              ) : (
+                filteredClipboardItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-2 bg-background rounded border border-border group hover:border-primary/50 transition-colors"
+                  >
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1 min-w-0 cursor-pointer" onClick={() => handleClipboardItemClick(item.content)}>
+                        <p className="text-xs font-mono text-text-primary break-all">
+                          {truncateContent(item.content, 120)}
+                        </p>
+                        <p className="text-xs text-text-muted mt-1">
+                          {formatTimestamp(item.timestamp)}
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => handleCopyToClipboard(item.content)}
+                          className="p-1 rounded bg-background-lighter text-text-muted hover:text-primary"
+                          title="Copy to clipboard"
+                        >
+                          <Copy className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => removeClipboardItem(item.id)}
+                          className="p-1 rounded bg-background-lighter text-text-muted hover:text-danger"
+                          title="Remove from history"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Info Footer */}
+            {filteredClipboardItems.length > 0 && (
+              <p className="text-xs text-text-muted text-center">
+                Keeps last 15 days • {filteredClipboardItems.length} items
+              </p>
+            )}
           </div>
         )}
       </div>
