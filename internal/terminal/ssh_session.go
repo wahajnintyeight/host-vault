@@ -111,15 +111,24 @@ func NewSSHSession(connectionID string, config ConnectionConfig, knownHostsMgr *
 
 	// Try private key if provided
 	if config.PrivateKey != "" {
+		log.Printf("[SSH] Attempting to parse private key for session %s (key length: %d)", sessionID, len(config.PrivateKey))
 		signer, err := ssh.ParsePrivateKey([]byte(config.PrivateKey))
-		if err == nil {
+		if err != nil {
+			log.Printf("[SSH] Failed to parse private key for session %s: %v", sessionID, err)
+			// Key might be encrypted, but we don't have passphrase support yet
+			// TODO: Add passphrase support
+		} else {
+			log.Printf("[SSH] Successfully parsed private key for session %s", sessionID)
 			authMethods = append(authMethods, ssh.PublicKeys(signer))
 		}
 	}
 
 	// If no auth methods provided, try with empty password (for key-based auth or no auth required)
 	if len(authMethods) == 0 {
+		log.Printf("[SSH] No auth methods available for session %s, trying empty password", sessionID)
 		authMethods = append(authMethods, ssh.Password(""))
+	} else {
+		log.Printf("[SSH] Using %d auth method(s) for session %s", len(authMethods), sessionID)
 	}
 
 	// Set up host key verification
@@ -299,7 +308,7 @@ func (s *SSHSession) keepAlive() {
 
 			_, err := s.session.SendRequest("keepalive@host-vault", true, nil)
 			s.mu.RUnlock()
-			
+
 			if err != nil {
 				log.Printf("[SSH] Keep-alive failed for session %s: %v - closing session", s.id, err)
 				// Connection is dead, trigger cleanup
@@ -424,10 +433,21 @@ func (s *SSHSession) Reconnect(config ConnectionConfig) error {
 	}
 
 	if config.PrivateKey != "" {
+		log.Printf("[SSH] Attempting to parse private key for reconnect (key length: %d)", len(config.PrivateKey))
 		signer, err := ssh.ParsePrivateKey([]byte(config.PrivateKey))
-		if err == nil {
+		if err != nil {
+			log.Printf("[SSH] Failed to parse private key for reconnect: %v", err)
+		} else {
+			log.Printf("[SSH] Successfully parsed private key for reconnect")
 			authMethods = append(authMethods, ssh.PublicKeys(signer))
 		}
+	}
+
+	if len(authMethods) == 0 {
+		log.Printf("[SSH] No auth methods available for reconnect, trying empty password")
+		authMethods = append(authMethods, ssh.Password(""))
+	} else {
+		log.Printf("[SSH] Using %d auth method(s) for reconnect", len(authMethods))
 	}
 
 	clientConfig := &ssh.ClientConfig{

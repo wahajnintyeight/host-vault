@@ -319,7 +319,7 @@ export const ConnectionFlowModal: React.FC<ConnectionFlowModalProps> = ({
                 <p className="text-sm text-text-muted">
                   {selectedAuthMethod === 'password'
                     ? 'Enter your password to connect'
-                    : 'Paste your private key content'}
+                    : 'Enter your private key to authenticate'}
                 </p>
               </div>
 

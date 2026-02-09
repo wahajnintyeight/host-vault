@@ -224,12 +224,40 @@ func (a *App) ShowMessageDialog(title string, message string, dialogType string)
 
 // ShowOpenFileDialog shows a native Windows file open dialog
 func (a *App) ShowOpenFileDialog(title string, fileType string) (string, error) {
-	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: title,
-		Filters: []runtime.FileFilter{
+	var filters []runtime.FileFilter
+
+	switch fileType {
+	case "json":
+		filters = []runtime.FileFilter{
 			{DisplayName: "JSON Files (*.json)", Pattern: "*.json"},
 			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
-		},
+		}
+	case "ssh-key":
+		filters = []runtime.FileFilter{
+			{DisplayName: "SSH Keys", Pattern: "id_rsa;id_dsa;id_ecdsa;id_ed25519;*.pem;*.key;*.pub"},
+			{DisplayName: "Private Keys", Pattern: "id_rsa;id_dsa;id_ecdsa;id_ed25519"},
+			{DisplayName: "PEM Files (*.pem)", Pattern: "*.pem"},
+			{DisplayName: "Key Files (*.key)", Pattern: "*.key"},
+			{DisplayName: "Public Keys (*.pub)", Pattern: "*.pub"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		}
+	case "ssh-cert":
+		filters = []runtime.FileFilter{
+			{DisplayName: "SSH Certificates", Pattern: "*.pub;*-cert.pub;*.crt;*.cer;*.pem"},
+			{DisplayName: "Certificate Files (*.crt, *.cer)", Pattern: "*.crt;*.cer"},
+			{DisplayName: "PEM Files (*.pem)", Pattern: "*.pem"},
+			{DisplayName: "Public Key Files (*.pub)", Pattern: "*.pub"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		}
+	default:
+		filters = []runtime.FileFilter{
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		}
+	}
+
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:   title,
+		Filters: filters,
 	})
 }
 
@@ -341,12 +369,13 @@ func (a *App) CreateSSHTerminal(host string, port int, username, password, priva
 		return "", errors.New("terminal manager not initialized")
 	}
 
-	fmt.Println("Creating SSH terminal for host:", host, "port:", port, "username:", username, "password:", password, "privateKey:", privateKey)
+	fmt.Println("Creating SSH terminal for host:", host, "port:", port, "username:", username)
 	config := terminal.ConnectionConfig{
 		Host:       host,
 		Port:       port,
 		Username:   username,
 		Password:   password,
+		PrivateKey: privateKey,
 	}
 	fmt.Println("Config:", config)
 
@@ -414,11 +443,10 @@ func (a *App) GetTerminalMetadata(sessionID string) (terminal.SessionMetadata, e
 func (a *App) GetGuestEncryptionKeyphrase() string {
 	// Try to get from environment variable first
 	keyphrase := os.Getenv("HOST_VAULT_GUEST_KEYPHRASE")
-	fmt.Println("Getting guest encryption keyphrase from environment variable", keyphrase)
 	if keyphrase != "" {
 		return keyphrase
 	}
-	
+
 	// Default keyphrase (should be changed in production via .env)
 	// In production, this should be set via environment variable
 	return "host-vault-guest-default-keyphrase-change-in-production"
@@ -429,12 +457,12 @@ func (a *App) GetSSHHostKeyInfo(host string, port int) (map[string]interface{}, 
 	if a.terminalManager == nil {
 		return nil, errors.New("terminal manager not initialized")
 	}
-	
+
 	info, err := a.terminalManager.GetHostKeyInfo(host, port)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get host key info: %w", err)
 	}
-	
+
 	return map[string]interface{}{
 		"fingerprintSHA256":   info.FingerprintSHA256,
 		"fingerprintMD5":      info.FingerprintMD5,
@@ -452,6 +480,6 @@ func (a *App) AcceptSSHHostKey(host string, port int, keyBase64 string, isGuest 
 	if a.terminalManager == nil {
 		return errors.New("terminal manager not initialized")
 	}
-	
+
 	return a.terminalManager.AcceptHostKey(host, port, keyBase64, isGuest)
 }

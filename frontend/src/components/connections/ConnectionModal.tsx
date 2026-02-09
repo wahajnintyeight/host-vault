@@ -15,6 +15,7 @@ import {
 import type { SSHConnection } from '../../types';
 import { decryptPassword, decryptPrivateKey } from '../../lib/encryption/crypto';
 import { useAuthStore } from '../../store/authStore';
+import { ShowOpenFileDialog, ReadFile } from '../../../wailsjs/go/main/App';
 
 export type AuthMethod = 'password' | 'key' | 'certificate';
 
@@ -54,7 +55,7 @@ interface ConnectionModalProps {
   onSave: (formData: ConnectionFormData) => void;
   onClose: () => void;
 }
-
+//the length from the back shouldnt be too long, rather short-medium combined. need a sligh fade from the side.
 export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   isOpen,
   editingConnection,
@@ -160,6 +161,30 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
 
   const handleSave = () => {
     onSave(formData);
+  };
+
+  const handleBrowsePrivateKey = async () => {
+    try {
+      const filePath = await ShowOpenFileDialog('Select SSH Private Key', 'ssh-key');
+      if (filePath) {
+        const content = await ReadFile(filePath);
+        setFormData({ ...formData, privateKey: content });
+      }
+    } catch (error) {
+      console.error('Failed to read private key file:', error);
+    }
+  };
+
+  const handleBrowseCertificate = async () => {
+    try {
+      const filePath = await ShowOpenFileDialog('Select SSH Certificate', 'ssh-cert');
+      if (filePath) {
+        const content = await ReadFile(filePath);
+        setFormData({ ...formData, certificate: content });
+      }
+    } catch (error) {
+      console.error('Failed to read certificate file:', error);
+    }
   };
 
   const isValid = formData.name.trim() && formData.host.trim() && formData.username.trim();
@@ -385,19 +410,41 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                       )}
                     </label>
                     <textarea
+                    disabled={false}
                       value={formData.privateKey}
                       onChange={(e) => setFormData({ ...formData, privateKey: e.target.value })}
                       placeholder="Paste your private key or browse to select file..."
                       rows={4}
                       className="w-full px-3 py-2 bg-background-light border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:border-primary transition-colors text-sm font-mono resize-none"
                     />
-                    <button
-                      type="button"
-                      className="mt-2 flex items-center gap-2 px-3 py-1.5 text-xs bg-background-lighter rounded-lg text-text-secondary hover:text-text-primary transition-colors"
-                    >
-                      <FolderOpen className="w-3.5 h-3.5" />
-                      Browse for key file
-                    </button>
+                    <div className="mt-2 flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={handleBrowsePrivateKey}
+                        className="flex items-center gap-2 px-3 py-1.5 text-xs bg-background-lighter rounded-lg text-text-secondary hover:text-text-primary transition-colors"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5" />
+                        Browse for key file
+                      </button>
+                      
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const text = await navigator.clipboard.readText();
+                            if (text) {
+                              setFormData({ ...formData, privateKey: text });
+                            }
+                          } catch (error) {
+                            console.error('Failed to read clipboard:', error);
+                          }
+                        }}
+                        className="flex items-center gap-2 px-3 py-1.5 text-xs bg-background-lighter rounded-lg text-text-secondary hover:text-text-primary transition-colors"
+                      >
+                        <span className="text-[10px] border border-current rounded px-1">Ctrl+V</span>
+                        Paste from clipboard
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-text-muted mb-1.5">Passphrase (optional)</label>
@@ -423,13 +470,34 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                     rows={4}
                     className="w-full px-3 py-2 bg-background-light border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:border-primary transition-colors text-sm font-mono resize-none"
                   />
-                  <button 
-                    type="button"
-                    className="mt-2 flex items-center gap-2 px-3 py-1.5 text-xs bg-background-lighter rounded-lg text-text-secondary hover:text-text-primary transition-colors"
-                  >
-                    <FolderOpen className="w-3.5 h-3.5" />
-                    Browse for certificate
-                  </button>
+                  <div className="mt-2 flex items-center justify-between">
+                    <button 
+                      type="button"
+                      onClick={handleBrowseCertificate}
+                      className="flex items-center gap-2 px-3 py-1.5 text-xs bg-background-lighter rounded-lg text-text-secondary hover:text-text-primary transition-colors"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      Browse for certificate
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const text = await navigator.clipboard.readText();
+                          if (text) {
+                            setFormData({ ...formData, certificate: text });
+                          }
+                        } catch (error) {
+                          console.error('Failed to read clipboard:', error);
+                        }
+                      }}
+                      className="flex items-center gap-2 px-3 py-1.5 text-xs bg-background-lighter rounded-lg text-text-secondary hover:text-text-primary transition-colors"
+                    >
+                      <span className="text-[10px] border border-current rounded px-1">Ctrl+V</span>
+                      Paste from clipboard
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

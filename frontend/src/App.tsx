@@ -20,6 +20,28 @@ function App() {
   const { isAuthenticated, isGuestMode, masterPasswordSet, user } = useAuthStore();
   const { config, loadUserConfig, loadGuestConfig } = useUserConfigStore();
 
+  // Prevent Ctrl+A (Select All) globally for desktop app feel
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Prevent Ctrl+A unless in an input/textarea
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+        const target = e.target as HTMLElement;
+        const isInput = target.tagName === 'INPUT' || 
+                       target.tagName === 'TEXTAREA' || 
+                       target.isContentEditable ||
+                       target.classList.contains('selectable');
+        
+        if (!isInput) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
+  }, []);
+
   // Load appropriate config on mount or when auth state changes
   React.useEffect(() => {
     if (isGuestMode) {

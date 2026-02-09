@@ -173,6 +173,37 @@ export const monokaiTheme: ITheme = {
 };
 
 /**
+ * Ember theme - Warm charcoal with orange accents
+ */
+export const emberTheme: ITheme = {
+  background: '#1C1917',
+  foreground: '#F5F5F4',
+  cursor: '#F97316',
+  cursorAccent: '#1C1917',
+  selectionBackground: 'rgba(249, 115, 22, 0.3)',
+  selectionForeground: '#FFFFFF',
+  selectionInactiveBackground: '#292524',
+  
+  black: '#1C1917',
+  red: '#EF4444',
+  green: '#10B981',
+  yellow: '#F59E0B',
+  blue: '#3B82F6',
+  magenta: '#D946EF',
+  cyan: '#06B6D4',
+  white: '#F5F5F4',
+  
+  brightBlack: '#57534E',
+  brightRed: '#F87171',
+  brightGreen: '#34D399',
+  brightYellow: '#FBBF24',
+  brightBlue: '#60A5FA',
+  brightMagenta: '#E879F9',
+  brightCyan: '#22D3EE',
+  brightWhite: '#FFFFFF',
+};
+
+/**
  * All available themes
  */
 export const terminalThemes: Record<string, ITheme> = {
@@ -181,7 +212,9 @@ export const terminalThemes: Record<string, ITheme> = {
   dracula: draculaTheme,
   nord: nordTheme,
   monokai: monokaiTheme,
+  ember: emberTheme,
 };
+
 
 /**
  * Get terminal theme by name
@@ -203,6 +236,7 @@ export const getTerminalThemeForApp = (appTheme: string): ITheme => {
     'dracula': 'dracula',
     'nord': 'nord',
     'monokai': 'monokai',
+    'ember': 'ember',
   };
   
   const terminalThemeName = themeMap[appTheme] || 'dark';

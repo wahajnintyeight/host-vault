@@ -1,4 +1,4 @@
-export type ThemeName = 'dark' | 'minimal' | 'cyberpunk' | 'rouge' | 'ocean' | 'forest' | 'sunset' | 'monochrome' | 'midnight' | 'aurora' | 'emerald' | 'amber' | 'slate' | 'lavender' | 'crimson';
+export type ThemeName = 'dark' | 'minimal' | 'cyberpunk' | 'rouge' | 'coral' | 'forest' | 'sunset' | 'monochrome' | 'midnight' | 'aurora' | 'emerald' | 'amber' | 'slate' | 'lavender' | 'crimson' | 'ember';
 
 export interface Theme {
   name: ThemeName;
@@ -217,47 +217,47 @@ export const themes: Record<ThemeName, Theme> = {
       border: 'rgba(194, 24, 91, 0.3)',
     },
   },
-  ocean: {
-    name: 'ocean',
-    displayName: 'Ocean',
-    description: 'Deep ocean blue with turquoise waves',
+  coral: {
+    name: 'coral',
+    displayName: 'Coral',
+    description: 'Dark charcoal with vibrant coral accents',
     colors: {
       background: {
-        DEFAULT: 'rgba(13, 27, 42, 1)',
-        light: 'rgba(20, 50, 80, 1)',
-        lighter: 'rgba(30, 80, 120, 1)',
+        DEFAULT: 'rgba(28, 25, 23, 1)',      // #1C1917 - Dark charcoal
+        light: 'rgba(41, 37, 36, 1)',        // #292524 - Lighter charcoal
+        lighter: 'rgba(68, 64, 60, 1)',      // #44403C - Even lighter
       },
       primary: {
-        DEFAULT: '#00B4DB',
-        dark: '#008BA3',
-        light: '#4DD0E1',
+        DEFAULT: '#FF7A5C',                   // Coral/Salmon
+        dark: '#FF5733',                      // Darker coral
+        light: '#FF9E85',                     // Lighter coral
       },
       secondary: {
-        DEFAULT: '#0099CC',
-        dark: '#0077B6',
-        light: '#42A5F5',
+        DEFAULT: '#78716C',                   // Warm gray
+        dark: '#57534E',                      // Darker gray
+        light: '#A8A29E',                     // Lighter gray
       },
       danger: {
-        DEFAULT: '#FF6B5B',
-        dark: '#E63946',
-        light: '#FF8A80',
+        DEFAULT: '#EF4444',
+        dark: '#DC2626',
+        light: '#F87171',
       },
       success: {
-        DEFAULT: '#1DE9B6',
-        dark: '#00BFA5',
-        light: '#64FFDA',
+        DEFAULT: '#10B981',
+        dark: '#059669',
+        light: '#34D399',
       },
       warning: {
-        DEFAULT: '#FFB74D',
-        dark: '#FF9800',
-        light: '#FFD54F',
+        DEFAULT: '#F59E0B',
+        dark: '#D97706',
+        light: '#FBBF24',
       },
       text: {
-        primary: '#FFFFFF',
-        secondary: '#B3E5FC',
-        muted: '#80DEEA',
+        primary: '#F5F5F4',                   // Off-white
+        secondary: '#E7E5E4',                 // Light gray
+        muted: '#A8A29E',                     // Muted gray
       },
-      border: 'rgba(0, 180, 219, 0.25)',
+      border: 'rgba(255, 122, 92, 0.2)',     // Coral with transparency
     },
   },
   forest: {
@@ -688,6 +688,49 @@ export const themes: Record<ThemeName, Theme> = {
         muted: '#F8A9A9',
       },
       border: 'rgba(230, 57, 70, 0.3)',
+    },
+  },
+  ember: {
+    name: 'ember',
+    displayName: 'Ember',
+    description: 'Warm charcoal with vibrant orange accents',
+    colors: {
+      background: {
+        DEFAULT: '#1C1917',
+        light: '#292524',
+        lighter: '#44403C',
+      },
+      primary: {
+        DEFAULT: '#F97316',
+        dark: '#EA580C',
+        light: '#FB923C',
+      },
+      secondary: {
+        DEFAULT: '#57534E',
+        dark: '#44403C',
+        light: '#78716C',
+      },
+      danger: {
+        DEFAULT: '#EF4444',
+        dark: '#DC2626',
+        light: '#F87171',
+      },
+      success: {
+        DEFAULT: '#10B981',
+        dark: '#059669',
+        light: '#34D399',
+      },
+      warning: {
+        DEFAULT: '#F59E0B',
+        dark: '#D97706',
+        light: '#FBBF24',
+      },
+      text: {
+        primary: '#F5F5F4',
+        secondary: '#E7E5E4',
+        muted: '#A8A29E',
+      },
+      border: 'rgba(249, 115, 22, 0.2)',
     },
   },
 };
