@@ -11,7 +11,7 @@ import {
   TerminalReconnectNeededEvent,
 } from '../../types/terminal';
 import { WriteToTerminal, ResizeTerminal } from '../../../wailsjs/go/main/App';
-import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime';
+import { EventsOn, EventsOff, ClipboardGetText, ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 import { getTerminalThemeFromCSS } from '../../lib/terminalTheme';
 import { useUserConfigStore } from '../../store/userConfigStore';
 
@@ -215,11 +215,77 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, isVisib
     }
   }, [config.theme, sessionId]);
 
+  // Track if terminal has focus
+  const [hasFocus, setHasFocus] = useState(false);
+
   // Keyboard shortcuts
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
       const instance = getInstance();
-      if (!instance?.container.contains(document.activeElement)) return;
+      if (!instance) return;
+      
+      // Check if event originated from this terminal's container or its children
+      const target = e.target as HTMLElement;
+      const isInThisTerminal = wrapperRef.current?.contains(target) || 
+                               instance.container.contains(target) ||
+                               instance.term.element?.contains(target) ||
+                               hasFocus;
+      
+      if (!isInThisTerminal) return;
+      
+      // Check for copy shortcuts (Ctrl+Shift+C or Cmd+Shift+C on Mac)
+      const isCopyShortcut = (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'C' || e.key === 'c');
+      const isPasteShortcut = (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'V' || e.key === 'v');
+      
+      // Handle copy
+      if (isCopyShortcut) {
+        e.preventDefault();
+        const selection = instance.term.getSelection();
+        console.log('[TERM] Copy shortcut detected, selection:', selection ? `${selection.length} chars` : 'none');
+        if (selection) {
+          try {
+            // Try Wails clipboard first
+            if (typeof ClipboardSetText === 'function') {
+              await ClipboardSetText(selection);
+              console.log('[TERM] Copied to clipboard via Wails');
+            } else {
+              // Fallback to browser clipboard
+              await navigator.clipboard.writeText(selection);
+              console.log('[TERM] Copied to clipboard via browser API');
+            }
+          } catch (error) {
+            console.error('[TERM] Failed to copy:', error);
+          }
+        }
+        return;
+      }
+      
+      // Handle paste
+      if (isPasteShortcut) {
+        e.preventDefault();
+        console.log('[TERM] Paste shortcut detected');
+        try {
+          let text = '';
+          // Try Wails clipboard first
+          if (typeof ClipboardGetText === 'function') {
+            text = await ClipboardGetText();
+            console.log('[TERM] Got text from Wails clipboard');
+          } else {
+            // Fallback to browser clipboard
+            text = await navigator.clipboard.readText();
+            console.log('[TERM] Got text from browser clipboard');
+          }
+          if (text && isWailsAvailable()) {
+            console.log('[TERM] Pasting text to terminal');
+            WriteToTerminal(sessionId, text).catch(console.error);
+          }
+        } catch (error) {
+          console.error('[TERM] Failed to paste:', error);
+        }
+        return;
+      }
+      
+      // Font size controls
       if (e.ctrlKey && (e.key === '+' || e.key === '=')) {
         e.preventDefault();
         setFontSize((prev) => Math.min(MAX_FONT_SIZE, prev + 1));
@@ -233,7 +299,7 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, isVisib
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [sessionId]);
+  }, [sessionId, hasFocus]);
 
   // Font size changes
   useEffect(() => {
@@ -389,12 +455,97 @@ const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ sessionId, isVisib
     };
   }, [sessionId]);
 
+  // Handle right-click context menu for copy/paste
+  const handleContextMenu = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    const instance = getInstance();
+    if (!instance) return;
+    
+    const selection = instance.term.getSelection();
+    
+    // Simple context menu
+    const menu = document.createElement('div');
+    menu.style.cssText = `
+      position: fixed;
+      background: var(--color-background-light);
+      border: 1px solid var(--color-border);
+      border-radius: 4px;
+      padding: 4px 0;
+      z-index: 1000;
+      left: ${e.clientX}px;
+      top: ${e.clientY}px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    `;
+    
+    const createMenuItem = (label: string, onClick: () => void, disabled = false) => {
+      const item = document.createElement('div');
+      item.textContent = label;
+      item.style.cssText = `
+        padding: 6px 16px;
+        cursor: ${disabled ? 'default' : 'pointer'};
+        color: ${disabled ? 'var(--color-text-muted)' : 'var(--color-text-primary)'};
+        font-size: 13px;
+      `;
+      if (!disabled) {
+        item.onmouseenter = () => item.style.background = 'var(--color-background-lighter)';
+        item.onmouseleave = () => item.style.background = 'transparent';
+        item.onclick = () => {
+          onClick();
+          menu.remove();
+        };
+      }
+      return item;
+    };
+    
+    menu.appendChild(createMenuItem('Copy', async () => {
+      if (selection) {
+        try {
+          if (typeof ClipboardSetText === 'function') {
+            await ClipboardSetText(selection);
+          } else {
+            await navigator.clipboard.writeText(selection);
+          }
+        } catch (error) {
+          console.error('Failed to copy:', error);
+        }
+      }
+    }, !selection));
+    
+    menu.appendChild(createMenuItem('Paste', async () => {
+      try {
+        let text = '';
+        if (typeof ClipboardGetText === 'function') {
+          text = await ClipboardGetText();
+        } else {
+          text = await navigator.clipboard.readText();
+        }
+        if (text && isWailsAvailable()) {
+          WriteToTerminal(sessionId, text).catch(console.error);
+        }
+      } catch (error) {
+        console.error('Failed to paste:', error);
+      }
+    }));
+    
+    document.body.appendChild(menu);
+    
+    // Remove menu on click elsewhere
+    const removeMenu = () => {
+      menu.remove();
+      document.removeEventListener('click', removeMenu);
+    };
+    setTimeout(() => document.addEventListener('click', removeMenu), 0);
+  };
+
   return (
     <div
       ref={wrapperRef}
       className="w-full h-full overflow-hidden bg-background p-2"
       tabIndex={0}
       onClick={() => getInstance()?.term.focus()}
+      onContextMenu={handleContextMenu}
+      onFocus={() => setHasFocus(true)}
+      onBlur={() => setHasFocus(false)}
     />
   );
 });

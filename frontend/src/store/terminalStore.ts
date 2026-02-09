@@ -552,27 +552,45 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
 // Initialize global event listeners
 if (typeof window !== "undefined") {
-  EventsOn("terminal:closed", (event: TerminalClosedEvent) => {
-    console.log("[TERM] Received terminal:closed event for session:", event.SessionID);
-    const state = useTerminalStore.getState();
-    
-    // Find all tabs using this sessionId
-    const tabsToClose = state.tabs.filter(t => t.sessionId === event.SessionID);
-    
-    if (tabsToClose.length > 0) {
-      console.log(`[TERM] Closing ${tabsToClose.length} tabs for session:`, event.SessionID);
-      tabsToClose.forEach(tab => {
-        state.removeTab(tab.id);
-      });
-    } else {
-      console.log("[TERM] No tabs found for closed session:", event.SessionID);
-      // Still cleanup session if it exists but has no tabs
-      if (state.sessions.has(event.SessionID)) {
-        state.removeSession(event.SessionID);
-        destroyTerminalInstance(event.SessionID);
-      }
+  // Delay event registration to ensure Wails runtime is ready
+  const setupEventListeners = () => {
+    // Check if Wails runtime is available
+    if (typeof window.go === "undefined" || typeof EventsOn !== "function") {
+      console.log("[TERM] Wails runtime not ready yet, retrying in 100ms...");
+      setTimeout(setupEventListeners, 100);
+      return;
     }
-  });
+    
+    console.log("[TERM] Setting up terminal event listeners");
+    EventsOn("terminal:closed", (event: TerminalClosedEvent) => {
+      console.log("[TERM] Received terminal:closed event for session:", event.SessionID);
+      const state = useTerminalStore.getState();
+      
+      // Find all tabs using this sessionId
+      const tabsToClose = state.tabs.filter(t => t.sessionId === event.SessionID);
+      
+      if (tabsToClose.length > 0) {
+        console.log(`[TERM] Closing ${tabsToClose.length} tabs for session:`, event.SessionID);
+        tabsToClose.forEach(tab => {
+          state.removeTab(tab.id);
+        });
+      } else {
+        console.log("[TERM] No tabs found for closed session:", event.SessionID);
+        // Still cleanup session if it exists but has no tabs
+        if (state.sessions.has(event.SessionID)) {
+          state.removeSession(event.SessionID);
+          destroyTerminalInstance(event.SessionID);
+        }
+      }
+    });
+  };
+  
+  // Start trying to set up event listeners
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", setupEventListeners);
+  } else {
+    setupEventListeners();
+  }
 }
 
 // Selectors

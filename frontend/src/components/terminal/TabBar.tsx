@@ -94,7 +94,7 @@ export const TabBar: React.FC<TabBarProps> = ({
       style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}
     >
       {/* Scrollable tab container */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden h-full scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+      <div className="flex-1 overflow-x-auto overflow-y-hidden h-full">
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}

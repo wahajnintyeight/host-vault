@@ -9,7 +9,7 @@ import { useAuthStore } from '../store/authStore';
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
-  const { connections } = useConnectionStore();
+  const { connections, setSelectedConnection } = useConnectionStore();
   const { user } = useAuthStore();
 
   const favoriteConnections = connections.filter((conn) => conn.isFavorite).slice(0, 5);
@@ -76,7 +76,10 @@ export const DashboardPage: React.FC = () => {
                 <div
                   key={conn.id}
                   className="p-3 bg-background rounded-md border border-border hover:border-primary transition-colors cursor-pointer"
-                  onClick={() => navigate(`${ROUTES.CONNECTIONS}/${conn.id}`)}
+                  onClick={() => {
+                    setSelectedConnection(conn);
+                    navigate(ROUTES.CONNECTIONS);
+                  }}
                 >
                   <p className="font-medium text-text-primary">{conn.name}</p>
                   <p className="text-sm text-text-secondary">{conn.host}:{conn.port}</p>
@@ -115,7 +118,10 @@ export const DashboardPage: React.FC = () => {
                 <div
                   key={conn.id}
                   className="p-3 bg-background rounded-md border border-border hover:border-primary transition-colors cursor-pointer"
-                  onClick={() => navigate(`${ROUTES.CONNECTIONS}/${conn.id}`)}
+                  onClick={() => {
+                    setSelectedConnection(conn);
+                    navigate(ROUTES.CONNECTIONS);
+                  }}
                 >
                   <p className="font-medium text-text-primary">{conn.name}</p>
                   <p className="text-sm text-text-secondary">{conn.host}:{conn.port}</p>

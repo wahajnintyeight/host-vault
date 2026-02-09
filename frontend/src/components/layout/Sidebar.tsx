@@ -32,7 +32,7 @@ export const Sidebar: React.FC = () => {
         'sticky top-0 h-screen overflow-y-auto',
         sidebarCollapsed ? 'w-16' : 'w-[5%]'
       )}
-      style={{ scrollbarWidth: 'thin', minWidth: sidebarCollapsed ? '64px' : '200px', maxWidth: sidebarCollapsed ? '64px' : '240px' }}
+      style={{ minWidth: sidebarCollapsed ? '64px' : '200px', maxWidth: sidebarCollapsed ? '64px' : '240px' }}
     >
       <nav className="p-4">
         <ul className="space-y-2">

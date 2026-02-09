@@ -164,6 +164,39 @@
     url("assets/fonts/nunito-v16-latin-regular.woff2") format("woff2");
 }
 
+/* Custom Scrollbar Styles - Minimal and Themed */
+
+/* Global scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-background);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+  border: 1px solid var(--color-background);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+::-webkit-scrollbar-corner {
+  background: var(--color-background);
+}
+
+/* Firefox scrollbar support */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) var(--color-background);
+}
+
 /* Terminal xterm.js customizations */
 .xterm-viewport {
   overflow-y: auto !important;
@@ -171,20 +204,20 @@
 }
 
 .xterm-viewport::-webkit-scrollbar {
-  width: 8px;
+  width: 6px !important;
 }
 
 .xterm-viewport::-webkit-scrollbar-track {
-  background: var(--color-background);
+  background: var(--color-background) !important;
 }
 
 .xterm-viewport::-webkit-scrollbar-thumb {
-  background: var(--color-background-lighter);
-  border-radius: 4px;
+  background: var(--color-border) !important;
+  border-radius: 3px !important;
 }
 
 .xterm-viewport::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
+  background: var(--color-text-muted) !important;
 }
 
 /* Hide horizontal scrollbar completely */

@@ -76,6 +76,7 @@ export const ConnectionsPage: React.FC = () => {
   const {
     connections,
     filteredConnections,
+    selectedConnection,
     isLoading,
     searchQuery,
     setSearchQuery,
@@ -83,6 +84,7 @@ export const ConnectionsPage: React.FC = () => {
     updateConnection,
     deleteConnection,
     setConnections,
+    setSelectedConnection,
   } = useConnectionStore();
   const { createSSHTerminal } = useTerminalStore();
   const { isGuestMode, user } = useAuthStore();
@@ -145,6 +147,17 @@ export const ConnectionsPage: React.FC = () => {
     };
     loadConnections();
   }, [setConnections, isGuestMode, user?.id]);
+
+  // Handle connection selected from dashboard
+  useEffect(() => {
+    if (selectedConnection) {
+      // Open the connection flow modal for the selected connection
+      setFlowConnection(selectedConnection);
+      setShowConnectionFlow(true);
+      // Clear the selection so it doesn't reopen on refresh
+      setSelectedConnection(null);
+    }
+  }, [selectedConnection, setSelectedConnection]);
 
   // Calculate selection box bounds
   const getSelectionBox = () => {
