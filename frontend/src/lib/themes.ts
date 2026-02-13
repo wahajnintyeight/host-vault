@@ -1,4 +1,4 @@
-export type ThemeName = 'dark' | 'minimal' | 'cyberpunk' | 'rouge' | 'coral' | 'forest' | 'sunset' | 'monochrome' | 'midnight' | 'aurora' | 'emerald' | 'amber' | 'slate' | 'lavender' | 'crimson' | 'ember';
+export type ThemeName = 'dark' | 'minimal' | 'cyberpunk' | 'rouge' | 'coral' | 'forest' | 'sunset' | 'monochrome' | 'midnight' | 'aurora' | 'emerald' | 'amber' | 'slate' | 'lavender' | 'crimson' | 'ember' | 'amethyst';
 
 export interface Theme {
   name: ThemeName;
@@ -731,6 +731,49 @@ export const themes: Record<ThemeName, Theme> = {
         muted: '#A8A29E',
       },
       border: 'rgba(249, 115, 22, 0.2)',
+    },
+  },
+  amethyst: {
+    name: 'amethyst',
+    displayName: 'Amethyst',
+    description: 'Soft violet purple with light lavender background',
+    colors: {
+      background: {
+        DEFAULT: 'rgba(245, 243, 255, 1)',      // Light lavender
+        light: 'rgba(255, 255, 255, 1)',        // White
+        lighter: 'rgba(250, 248, 255, 1)',      // Very light purple
+      },
+      primary: {
+        DEFAULT: '#7C5CFC',                     // Vibrant purple
+        dark: '#6245E0',                        // Darker purple
+        light: '#9D8BC7',                       // Light purple
+      },
+      secondary: {
+        DEFAULT: '#A78BFA',                     // Soft purple
+        dark: '#8B5CF6',                        // Medium purple
+        light: '#C4B5FD',                       // Very light purple
+      },
+      danger: {
+        DEFAULT: '#EF4444',
+        dark: '#DC2626',
+        light: '#F87171',
+      },
+      success: {
+        DEFAULT: '#10B981',
+        dark: '#059669',
+        light: '#34D399',
+      },
+      warning: {
+        DEFAULT: '#F59E0B',
+        dark: '#D97706',
+        light: '#FBBF24',
+      },
+      text: {
+        primary: '#1F2937',                     // Dark gray
+        secondary: '#4B5563',                   // Medium gray
+        muted: '#9CA3AF',                       // Light gray
+      },
+      border: 'rgba(124, 92, 252, 0.2)',        // Purple with transparency
     },
   },
 };
