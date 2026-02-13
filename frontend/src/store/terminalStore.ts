@@ -371,7 +371,6 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       port,
       username,
       name,
-      password,
     });
 
     try {

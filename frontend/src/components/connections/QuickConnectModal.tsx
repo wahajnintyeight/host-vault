@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Zap, Loader, Copy, Check } from 'lucide-react';
 
 interface QuickConnectModalProps {
@@ -61,8 +62,8 @@ export const QuickConnectModal: React.FC<QuickConnectModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+  return createPortal(
+    <div className="fixed inset-0 z-[1000] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-background-light border border-border rounded-xl shadow-2xl w-full max-w-md">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
@@ -162,6 +163,7 @@ export const QuickConnectModal: React.FC<QuickConnectModalProps> = ({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

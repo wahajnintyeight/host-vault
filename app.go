@@ -377,7 +377,6 @@ func (a *App) CreateSSHTerminal(host string, port int, username, password, priva
 		Password:   password,
 		PrivateKey: privateKey,
 	}
-	fmt.Println("Config:", config)
 
 	return a.terminalManager.CreateSSHSession("", config)
 }

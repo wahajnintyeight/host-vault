@@ -9,6 +9,7 @@ import {
   Terminal,
   Zap,
   Star,
+  Trash2,
 } from 'lucide-react';
 import { useConnectionStore } from '../store/connectionStore';
 import { useNavigate } from 'react-router-dom';
@@ -19,7 +20,9 @@ import { QuickConnectModal } from '../components/connections/QuickConnectModal';
 import { PasswordPromptModal } from '../components/connections/PasswordPromptModal';
 import { HostKeyVerificationModal } from '../components/connections/HostKeyVerificationModal';
 import { ConnectionFlowModal } from '../components/connections/ConnectionFlowModal';
+import type { AuthMethod } from '../components/connections/ConnectionFlowModal';
 import { ConnectionCard } from '../components/connections/ConnectionCard';
+import { DeleteConfirmModal } from '../components/connections/DeleteConfirmModal';
 import type { SSHConnection } from '../types';
 import { encryptPassword, encryptPrivateKey, decryptPassword, decryptPrivateKey, encryptDataWithKeyphrase, decryptDataWithKeyphrase } from '../lib/encryption/crypto';
 import { useAuthStore } from '../store/authStore';
@@ -95,6 +98,8 @@ export const ConnectionsPage: React.FC = () => {
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
   const [showHostKeyVerification, setShowHostKeyVerification] = useState(false);
   const [showConnectionFlow, setShowConnectionFlow] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
   const [hostKeyVerificationInfo, setHostKeyVerificationInfo] = useState<{
     host: string;
     port: number;
@@ -573,10 +578,41 @@ export const ConnectionsPage: React.FC = () => {
     handleCloseModal();
   };
 
-  const handleDelete = async (id: string) => {
-    deleteConnection(id);
-    const newConns = connections.filter(c => c.id !== id);
+  const handleDelete = (id: string) => {
+    setPendingDeleteIds([id]);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleBulkDelete = () => {
+    if (selectedConnectionIds.size === 0) return;
+    setPendingDeleteIds(Array.from(selectedConnectionIds));
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = async () => {
+    if (pendingDeleteIds.length === 0) return;
+
+    // Delete all pending connections
+    pendingDeleteIds.forEach((id) => {
+      deleteConnection(id);
+    });
+
+    const newConns = connections.filter((c) => !pendingDeleteIds.includes(c.id));
     await saveToStorage(newConns);
+
+    // Clear selection if we deleted selected items
+    if (pendingDeleteIds.some((id) => selectedConnectionIds.has(id))) {
+      setSelectedConnectionIds(new Set());
+    }
+
+    // Reset state
+    setPendingDeleteIds([]);
+    setShowDeleteConfirm(false);
+  };
+
+  const cancelDelete = () => {
+    setPendingDeleteIds([]);
+    setShowDeleteConfirm(false);
   };
 
   const handleToggleFavorite = async (connection: SSHConnection) => {
@@ -655,7 +691,7 @@ export const ConnectionsPage: React.FC = () => {
   };
 
   const handleConnectionFlowConnect = async (
-    authMethod: 'password' | 'key' | 'certificate',
+    authMethod: AuthMethod,
     credentials: { password?: string; privateKey?: string; passphrase?: string }
   ) => {
     if (!flowConnection) return;
@@ -676,6 +712,11 @@ export const ConnectionsPage: React.FC = () => {
         console.log('[CONN] Using provided credentials');
         password = authMethod === 'password' ? credentials.password || '' : '';
         privateKey = (authMethod === 'key' || authMethod === 'certificate') ? credentials.privateKey || '' : '';
+      } else if (authMethod === 'none') {
+        // For 'none' auth method, use empty credentials
+        console.log('[CONN] Using no authentication (passwordless)');
+        password = '';
+        privateKey = '';
       } else {
         // Use saved credentials from connection
         console.log('[CONN] Using saved credentials from connection', {
@@ -981,35 +1022,24 @@ export const ConnectionsPage: React.FC = () => {
   };
 
   const handleQuickConnect = (username: string, host: string, port: number) => {
-    setPendingConnection({ username, host, port });
-    setIsConnecting(true);
+    // Create a temporary connection object for the flow modal
+    const quickConn: SSHConnection = {
+      id: `quick-${Date.now()}`,
+      userId: 'guest',
+      name: `${username}@${host}`,
+      host,
+      port,
+      username,
+      isFavorite: false,
+      version: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
 
-    createSSHTerminal(host, port, username, '', '')
-      .then(() => {
-        setIsConnecting(false);
-        setShowQuickConnect(false);
-        setPendingConnection(null);
-        setShowPasswordPrompt(false);
-        navigate(ROUTES.TERMINAL);
-      })
-      .catch((error: any) => {
-        // Check if error indicates password is needed
-        if (error?.message?.includes('permission denied') || error?.message?.includes('auth')) {
-          setIsConnecting(false);
-          setShowQuickConnect(false);
-          setShowPasswordPrompt(true);
-          // Save connection without password for now
-          saveQuickConnectConnection(username, host, port);
-        } else {
-          setIsConnecting(false);
-          // Save connection even on failure
-          saveQuickConnectConnection(username, host, port);
-          setPendingConnection(null);
-          setShowQuickConnect(false);
-          setShowPasswordPrompt(false);
-          console.error('Failed to connect:', error);
-        }
-      });
+    // Close quick connect modal and open connection flow
+    setShowQuickConnect(false);
+    setFlowConnection(quickConn);
+    setShowConnectionFlow(true);
   };
 
   const handlePasswordSubmit = (password: string) => {
@@ -1180,6 +1210,19 @@ export const ConnectionsPage: React.FC = () => {
               </span>
             )}
           </button>
+          {selectedConnectionIds.size > 0 && (
+            <button
+              onClick={handleBulkDelete}
+              className="flex items-center gap-2 px-3 py-2 text-sm bg-danger/10 text-danger rounded-lg hover:bg-danger/20 transition-all border border-danger/30"
+              title={`Delete ${selectedConnectionIds.size} selected connection(s)`}
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete
+              <span className="ml-1 px-1.5 py-0.5 text-xs bg-danger/20 text-danger rounded">
+                {selectedConnectionIds.size}
+              </span>
+            </button>
+          )}
           <button
             onClick={() => handleOpenModal()}
             className="flex items-center gap-2 px-4 py-2 text-sm bg-primary text-background font-medium rounded-lg hover:bg-primary-dark transition-all shadow-lg shadow-primary/20"
@@ -1466,6 +1509,14 @@ export const ConnectionsPage: React.FC = () => {
           }}
         />
       )}
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={showDeleteConfirm}
+        connections={connections.filter((c) => pendingDeleteIds.includes(c.id))}
+        onConfirm={confirmDelete}
+        onCancel={cancelDelete}
+      />
 
       {/* Selection Box Overlay */}
       {isDragging && selectionBox && (

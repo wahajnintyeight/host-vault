@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Shield, Lock, Key, FileKey, Loader, CheckCircle, AlertTriangle, Terminal, Server, Eye, EyeOff } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { X, Shield, Lock, Key, FileKey, Loader, CheckCircle, AlertTriangle, Terminal, Server, Eye, EyeOff, FolderOpen } from 'lucide-react';
 import type { SSHConnection } from '../../types';
 
-export type AuthMethod = 'password' | 'key' | 'certificate';
+export type AuthMethod = 'password' | 'key' | 'certificate' | 'none';
 
 interface ConnectionFlowModalProps {
   isOpen: boolean;
@@ -33,6 +34,7 @@ export const ConnectionFlowModal: React.FC<ConnectionFlowModalProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [internalHostVerified, setInternalHostVerified] = useState(false);
   const autoConnectTriggeredRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-connect with saved credentials
   const handleAutoConnect = useCallback(async () => {
@@ -115,7 +117,12 @@ export const ConnectionFlowModal: React.FC<ConnectionFlowModalProps> = ({
 
   const handleAuthMethodSelect = (method: AuthMethod) => {
     setSelectedAuthMethod(method);
-    setCurrentStep('auth-input');
+    if (method === 'none') {
+      // Skip auth-input step for 'none' auth method
+      setCurrentStep('connecting');
+    } else {
+      setCurrentStep('auth-input');
+    }
   };
 
   const handleBack = () => {
@@ -137,6 +144,34 @@ export const ConnectionFlowModal: React.FC<ConnectionFlowModalProps> = ({
       // Error is handled by parent component
       console.error('Connection failed:', err);
     }
+  };
+
+  const handleNoneConnect = async () => {
+    try {
+      await onConnect('none', {});
+    } catch (err) {
+      // Error is handled by parent component
+      console.error('Connection failed:', err);
+    }
+  };
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      setPrivateKey(content);
+    };
+    reader.onerror = () => {
+      console.error('Failed to read file');
+    };
+    reader.readAsText(file);
+  };
+
+  const handleBrowseClick = () => {
+    fileInputRef.current?.click();
   };
 
   const getStepIndex = (step: ConnectionStep): number => {
@@ -164,8 +199,8 @@ export const ConnectionFlowModal: React.FC<ConnectionFlowModalProps> = ({
 
   const currentStepIndex = getStepIndex(currentStep);
 
-  return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+  return createPortal(
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
       <div className="bg-background-light border border-border rounded-xl shadow-2xl w-full max-w-lg">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
@@ -258,7 +293,7 @@ export const ConnectionFlowModal: React.FC<ConnectionFlowModalProps> = ({
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <button
                   onClick={() => handleAuthMethodSelect('password')}
                   className={`p-4 rounded-lg border-2 transition-all ${
@@ -286,6 +321,23 @@ export const ConnectionFlowModal: React.FC<ConnectionFlowModalProps> = ({
                     Public Key
                   </p>
                 </button>
+
+                <button
+                  onClick={() => handleAuthMethodSelect('none')}
+                  className={`p-4 rounded-lg border-2 transition-all ${
+                    selectedAuthMethod === 'none'
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border bg-background hover:border-primary/50'
+                  }`}
+                >
+                  <Shield className={`w-6 h-6 mx-auto mb-2 ${selectedAuthMethod === 'none' ? 'text-primary' : 'text-text-muted'}`} />
+                  <p className={`text-sm font-medium ${selectedAuthMethod === 'none' ? 'text-primary' : 'text-text-primary'}`}>
+                    None
+                  </p>
+                  <p className={`text-xs mt-1 ${selectedAuthMethod === 'none' ? 'text-primary/70' : 'text-text-muted'}`}>
+                    No auth
+                  </p>
+                </button>
               </div>
 
               <div className="flex gap-3">
@@ -307,106 +359,168 @@ export const ConnectionFlowModal: React.FC<ConnectionFlowModalProps> = ({
 
           {currentStep === 'auth-input' && (
             <div className="space-y-4">
-              <div className="text-center space-y-2">
-                {selectedAuthMethod === 'password' ? (
-                  <Lock className="w-12 h-12 text-primary mx-auto" />
-                ) : (
-                  <Key className="w-12 h-12 text-primary mx-auto" />
-                )}
-                <h3 className="text-lg font-semibold text-text-primary">
-                  {selectedAuthMethod === 'password' ? 'Enter Password' : 'Enter Private Key'}
-                </h3>
-                <p className="text-sm text-text-muted">
-                  {selectedAuthMethod === 'password'
-                    ? 'Enter your password to connect'
-                    : 'Enter your private key to authenticate'}
-                </p>
-              </div>
-
-              {selectedAuthMethod === 'password' ? (
-                <div>
-                  <label className="block text-xs font-medium text-text-muted mb-1.5 flex items-center gap-1.5">
-                    <Lock className="w-3.5 h-3.5" />
-                    Password
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Enter your password"
-                      autoFocus
-                      className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:border-primary transition-colors text-sm"
-                    />
+              {selectedAuthMethod === 'none' ? (
+                <>
+                  <div className="text-center space-y-2">
+                    <Shield className="w-12 h-12 text-primary mx-auto" />
+                    <h3 className="text-lg font-semibold text-text-primary">No Authentication</h3>
+                    <p className="text-sm text-text-muted">
+                      Connect without authentication (passwordless/public access)
+                    </p>
+                  </div>
+                  <div className="bg-warning/10 border border-warning/30 rounded-lg p-4">
+                    <p className="text-sm text-warning">
+                      Warning: This will attempt to connect without any authentication. 
+                      Only use this for servers configured to allow passwordless access.
+                    </p>
+                  </div>
+                  <div className="flex gap-3">
                     <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
+                      onClick={handleBack}
+                      disabled={isConnecting}
+                      className="flex-1 px-4 py-2 text-sm bg-background-lighter text-text-secondary hover:text-text-primary rounded-lg transition-all disabled:opacity-50"
                     >
-                      {showPassword ? (
-                        <EyeOff className="w-4 h-4" />
+                      Back
+                    </button>
+                    <button
+                      onClick={handleNoneConnect}
+                      disabled={isConnecting}
+                      className="flex-1 px-4 py-2 text-sm bg-primary text-background font-medium rounded-lg hover:bg-primary-dark transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {isConnecting ? (
+                        <>
+                          <Loader className="w-4 h-4 animate-spin" />
+                          Connecting...
+                        </>
                       ) : (
-                        <Eye className="w-4 h-4" />
+                        <>
+                          <CheckCircle className="w-4 h-4" />
+                          Connect
+                        </>
                       )}
                     </button>
                   </div>
-                </div>
+                </>
               ) : (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-medium text-text-muted mb-1.5 flex items-center gap-1.5">
-                      <FileKey className="w-3.5 h-3.5" />
-                      Private Key
-                    </label>
-                    <textarea
-                      value={privateKey}
-                      onChange={(e) => setPrivateKey(e.target.value)}
-                      placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"
-                      rows={8}
-                      className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:border-primary transition-colors text-sm font-mono"
-                    />
+                <>
+                  <div className="text-center space-y-2">
+                    {selectedAuthMethod === 'password' ? (
+                      <Lock className="w-12 h-12 text-primary mx-auto" />
+                    ) : (
+                      <Key className="w-12 h-12 text-primary mx-auto" />
+                    )}
+                    <h3 className="text-lg font-semibold text-text-primary">
+                      {selectedAuthMethod === 'password' ? 'Enter Password' : 'Enter Private Key'}
+                    </h3>
+                    <p className="text-sm text-text-muted">
+                      {selectedAuthMethod === 'password'
+                        ? 'Enter your password to connect'
+                        : 'Enter your private key to authenticate'}
+                    </p>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-text-muted mb-1.5">
-                      Passphrase (optional)
-                    </label>
-                    <input
-                      type="password"
-                      value={passphrase}
-                      onChange={(e) => setPassphrase(e.target.value)}
-                      placeholder="Enter passphrase if key is encrypted"
-                      className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:border-primary transition-colors text-sm"
-                    />
-                  </div>
-                </div>
-              )}
 
-              <div className="flex gap-3">
-                <button
-                  onClick={handleBack}
-                  disabled={isConnecting}
-                  className="flex-1 px-4 py-2 text-sm bg-background-lighter text-text-secondary hover:text-text-primary rounded-lg transition-all disabled:opacity-50"
-                >
-                  Back
-                </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={isConnecting || (selectedAuthMethod === 'password' && !password) || ((selectedAuthMethod === 'key' || selectedAuthMethod === 'certificate') && !privateKey)}
-                  className="flex-1 px-4 py-2 text-sm bg-primary text-background font-medium rounded-lg hover:bg-primary-dark transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  {isConnecting ? (
-                    <>
-                      <Loader className="w-4 h-4 animate-spin" />
-                      Connecting...
-                    </>
+                  {selectedAuthMethod === 'password' ? (
+                    <div>
+                      <label className="block text-xs font-medium text-text-muted mb-1.5 flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5" />
+                        Password
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder="Enter your password"
+                          autoFocus
+                          className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:border-primary transition-colors text-sm"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
+                        >
+                          {showPassword ? (
+                            <EyeOff className="w-4 h-4" />
+                          ) : (
+                            <Eye className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
                   ) : (
-                    <>
-                      <CheckCircle className="w-4 h-4" />
-                      Connect
-                    </>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs font-medium text-text-muted mb-1.5 flex items-center gap-1.5">
+                          <FileKey className="w-3.5 h-3.5" />
+                          Private Key
+                        </label>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          onChange={handleFileSelect}
+                          className="hidden"
+                        />
+                        <div className="flex gap-2">
+                          <textarea
+                            value={privateKey}
+                            onChange={(e) => setPrivateKey(e.target.value)}
+                            placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"
+                            rows={8}
+                            className="flex-1 px-3 py-2 bg-background border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:border-primary transition-colors text-sm font-mono"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleBrowseClick}
+                          className="mt-2 w-full px-3 py-2 text-xs bg-background-lighter text-text-secondary hover:text-text-primary rounded-lg transition-all flex items-center justify-center gap-2 border border-border hover:border-primary/50"
+                        >
+                          <FolderOpen className="w-4 h-4" />
+                          Browse for key file...
+                        </button>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-text-muted mb-1.5">
+                          Passphrase (optional)
+                        </label>
+                        <input
+                          type="password"
+                          value={passphrase}
+                          onChange={(e) => setPassphrase(e.target.value)}
+                          placeholder="Enter passphrase if key is encrypted"
+                          className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:border-primary transition-colors text-sm"
+                        />
+                      </div>
+                    </div>
                   )}
-                </button>
-              </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleBack}
+                      disabled={isConnecting}
+                      className="flex-1 px-4 py-2 text-sm bg-background-lighter text-text-secondary hover:text-text-primary rounded-lg transition-all disabled:opacity-50"
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={handleSubmit}
+                      disabled={isConnecting || (selectedAuthMethod === 'password' && !password) || ((selectedAuthMethod === 'key' || selectedAuthMethod === 'certificate') && !privateKey)}
+                      className="flex-1 px-4 py-2 text-sm bg-primary text-background font-medium rounded-lg hover:bg-primary-dark transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {isConnecting ? (
+                        <>
+                          <Loader className="w-4 h-4 animate-spin" />
+                          Connecting...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="w-4 h-4" />
+                          Connect
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -469,7 +583,8 @@ export const ConnectionFlowModal: React.FC<ConnectionFlowModalProps> = ({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
