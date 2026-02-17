@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Menu, Terminal } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useUserConfigStore } from '../../store/userConfigStore';
@@ -59,7 +59,6 @@ export const Header: React.FC = () => {
       const oldIndex = activeData.index as number;
       const newIndex = overData.index as number;
       
-      console.log('[HEADER] Reordering tab from', oldIndex, 'to', newIndex);
       reorderTabs(oldIndex, newIndex);
     }
   };
@@ -70,7 +69,6 @@ export const Header: React.FC = () => {
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     // Only trigger on the header itself, not on interactive elements
-    console.log("DOUBE CLICK TRIGGERED!")
     if ((e.target as HTMLElement).closest('.no-drag')) return;
     
     if (typeof window !== 'undefined' && window.go && window.go.main && window.go.main.App) {
@@ -84,7 +82,6 @@ export const Header: React.FC = () => {
 
   // Terminal tab handlers
   const handleTabSelect = (tabId: string) => {
-    console.log("HANDLE TAB SELECT",tabId)
     setActiveTab(tabId);
     // Navigate to terminal page if not already there
     if (!isTerminalPage) {

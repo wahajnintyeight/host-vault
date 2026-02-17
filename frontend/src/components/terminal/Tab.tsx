@@ -55,11 +55,6 @@ export const Tab: React.FC<TabProps> = ({
     },
   });
 
-  // Debug: Log when listeners are attached
-  useEffect(() => {
-    console.log('[TAB] Sortable setup for tab:', tab.id, 'listeners:', listeners);
-  }, [tab.id, listeners]);
-
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -106,6 +101,10 @@ export const Tab: React.FC<TabProps> = ({
     e.preventDefault();
     e.stopPropagation();
     setContextMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    listeners?.onPointerDown?.(e);
   };
 
   const handleContextMenuAction = (action: TabAction) => {
@@ -179,9 +178,7 @@ export const Tab: React.FC<TabProps> = ({
         onClick={onActivate}
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
-        onPointerDown={(e) => {
-          console.log('[TAB] PointerDown on tab:', tab.id, 'target:', e.target);
-        }}
+        onPointerDown={handlePointerDown}
       >
         {/* Drag Handle - Visual affordance only */}
         <div
