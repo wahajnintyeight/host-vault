@@ -43,7 +43,7 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		OnStartup:        app.startup,
 		CSSDragProperty:  "--wails-draggable",
-		CSSDragValue:     "drag",
+		CSSDragValue:     "drag", 
 		Windows: &windows.Options{
 			DisableWindowIcon: false,
 			Theme: windows.Dark,

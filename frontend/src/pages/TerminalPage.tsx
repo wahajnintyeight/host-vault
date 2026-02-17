@@ -2,9 +2,10 @@ import React, { useRef, useState, useEffect, useCallback, useMemo, memo } from '
 import { useNavigate } from 'react-router-dom';
 import { useTerminalStore } from '../store/terminalStore';
 import Terminal, { TerminalHandle } from '../components/terminal/Terminal';
-import { TerminalDrawer } from '../components/terminal/TerminalDrawer';
 import { PanelRightOpen, PanelRightClose, Server } from 'lucide-react';
+import { TerminalDrawer } from '../components/terminal/TerminalDrawer';
 import { ROUTES } from '../lib/constants';
+import { getActiveSessionId } from '../lib/terminalUtils';
 
 /**
  * Memoized terminal wrapper to prevent re-renders when switching tabs
@@ -72,7 +73,7 @@ export const TerminalPage: React.FC = () => {
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
-  const activeSessionId = activeTab?.sessionId;
+  const activeSessionId = activeTab ? getActiveSessionId(activeTab) : null;
   const isConnecting = !!connectingSessionId;
 
   // Memoize session IDs to prevent re-renders when the array content hasn't changed

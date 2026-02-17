@@ -23,9 +23,9 @@ import { useSnippetsStore, Snippet } from '../store/snippetsStore';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '../lib/constants';
 import { useTerminalStore } from '../store/terminalStore';
-import { ShowSaveFileDialog, ShowOpenFileDialog, WriteFile, ReadFile, WriteToTerminal } from '../../wailsjs/go/main/App';
+import { getActiveSessionId } from '../lib/terminalUtils';
 
-// Check if Wails bindings are available
+import { ShowSaveFileDialog, ShowOpenFileDialog, WriteFile, ReadFile, WriteToTerminal } from '../../wailsjs/go/main/App';
 const isWailsAvailable = (): boolean => {
   return typeof window !== 'undefined' && window.go?.main?.App;
 };
@@ -104,8 +104,11 @@ export const CommandsPage: React.FC = () => {
     // Small delay to ensure terminal is ready
     setTimeout(() => {
       const activeTab = useTerminalStore.getState().tabs.find(t => t.id === useTerminalStore.getState().activeTabId);
-      if (activeTab && isWailsAvailable()) {
-        WriteToTerminal(activeTab.sessionId, command + '\r');
+      if (activeTab) {
+          const sessionId = getActiveSessionId(activeTab);
+          if (sessionId && isWailsAvailable()) {
+            WriteToTerminal(sessionId, command + '\r');
+          }
       }
     }, 300);
   };

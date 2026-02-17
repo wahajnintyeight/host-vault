@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Terminal, Server, X } from 'lucide-react';
+import { Terminal, Server, X, GripVertical } from 'lucide-react';
 import { TerminalTab, SessionType, TabAction } from '../../types/terminal';
 import { TerminalContextMenu } from './TerminalContextMenu';
 
@@ -20,10 +20,6 @@ interface TabProps {
   onCloseAll?: () => void;
 }
 
-/**
- * Clean, minimal terminal tab component with drag support
- * Uses theme CSS variables for consistent styling
- */
 export const Tab: React.FC<TabProps> = ({
   tab,
   sessionType = SessionType.Local,
@@ -50,11 +46,24 @@ export const Tab: React.FC<TabProps> = ({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: tab.id });
+  } = useSortable({ 
+    id: tab.id,
+    data: {
+      type: 'tab',
+      tab,
+      index: tabIndex,
+    },
+  });
 
-  const style = {
+  // Debug: Log when listeners are attached
+  useEffect(() => {
+    console.log('[TAB] Sortable setup for tab:', tab.id, 'listeners:', listeners);
+  }, [tab.id, listeners]);
+
+  const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
+    opacity: isDragging ? 0.5 : 1,
   };
 
   useEffect(() => {
@@ -124,7 +133,6 @@ export const Tab: React.FC<TabProps> = ({
     setContextMenu(null);
   };
 
-  // Get icon based on session type
   const getIcon = () => {
     if (sessionType === SessionType.SSH) {
       return <Server className="w-3.5 h-3.5 flex-shrink-0" />;
@@ -132,16 +140,33 @@ export const Tab: React.FC<TabProps> = ({
     return <Terminal className="w-3.5 h-3.5 flex-shrink-0" />;
   };
 
+  if (isDragging) {
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        className="flex items-center gap-2 px-3 h-10 min-w-fit max-w-[180px] opacity-0 scale-95 border-b-2 border-primary bg-background"
+      >
+        <GripVertical className="w-3.5 h-3.5 text-text-muted" />
+        <span className="text-primary flex-shrink-0">{getIcon()}</span>
+        <span className="flex-1 min-w-0 truncate text-sm font-medium text-text-primary">
+          {tab.title}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <>
       <div
         ref={setNodeRef}
-        style={{
-          ...style,
-          '--wails-draggable': 'no-drag',
-        } as React.CSSProperties}
         {...attributes}
         {...listeners}
+        style={{
+          ...style,
+          touchAction: 'none',
+          '--wails-draggable': 'no-drag',
+        } as React.CSSProperties}
         className={`
           group flex items-center gap-2 px-3 h-10 min-w-fit max-w-[180px]
           cursor-pointer transition-all duration-200 select-none whitespace-nowrap
@@ -150,18 +175,25 @@ export const Tab: React.FC<TabProps> = ({
             ? 'border-primary bg-background text-text-primary'
             : 'border-transparent bg-transparent text-text-secondary hover:text-text-primary hover:bg-background-light/40'
           }
-          ${isDragging ? 'opacity-50 scale-95' : ''}
         `}
         onClick={onActivate}
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
+        onPointerDown={(e) => {
+          console.log('[TAB] PointerDown on tab:', tab.id, 'target:', e.target);
+        }}
       >
-        {/* Icon */}
+        {/* Drag Handle - Visual affordance only */}
+        <div
+          className="flex-shrink-0 cursor-grab active:cursor-grabbing p-1 -ml-1 rounded hover:bg-background-lighter text-text-muted hover:text-text-primary transition-colors"
+        >
+          <GripVertical className="w-3.5 h-3.5" />
+        </div>
+
         <span className={`flex-shrink-0 ${isActive ? 'text-primary' : 'text-text-muted'}`}>
           {getIcon()}
         </span>
 
-        {/* Tab title or input */}
         {isEditing ? (
           <input
             ref={inputRef}
@@ -172,6 +204,7 @@ export const Tab: React.FC<TabProps> = ({
             onKeyDown={handleKeyDown}
             className="flex-1 min-w-0 bg-transparent text-text-primary text-sm font-medium outline-none border-b border-primary"
             onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
             style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}
           />
         ) : (
@@ -180,9 +213,9 @@ export const Tab: React.FC<TabProps> = ({
           </span>
         )}
 
-        {/* Close button */}
         <button
           onClick={handleClose}
+          onPointerDown={(e) => e.stopPropagation()}
           className={`
             ml-1 p-1 rounded transition-all duration-150 flex-shrink-0
             opacity-0 group-hover:opacity-100
@@ -195,7 +228,6 @@ export const Tab: React.FC<TabProps> = ({
         </button>
       </div>
 
-      {/* Context Menu */}
       {contextMenu && (
         <TerminalContextMenu
           x={contextMenu.x}

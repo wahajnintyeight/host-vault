@@ -36,7 +36,7 @@ export interface TerminalSession {
 
 export interface TerminalTab {
   id: string;
-  sessionId: string;
+  layout: LayoutNode;
   title: string;
 }
 

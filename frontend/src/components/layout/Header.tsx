@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Menu, Terminal } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useUserConfigStore } from '../../store/userConfigStore';
@@ -8,6 +8,15 @@ import { WindowMaximize } from '../../../wailsjs/go/main/App';
 import { ROUTES } from '../../lib/constants';
 import { TabBar } from '../terminal/TabBar';
 import { useTerminalStore } from '../../store/terminalStore';
+import { getActiveSessionId } from '../../lib/terminalUtils';
+import {
+  DndContext,
+  DragEndEvent,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+} from '@dnd-kit/core';
 
 export const Header: React.FC = () => {
   const { updateConfig, config } = useUserConfigStore();
@@ -29,12 +38,39 @@ export const Header: React.FC = () => {
 
   const isTerminalPage = location.pathname === ROUTES.TERMINAL;
 
+  // DnD sensors for tab reordering
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 3,
+      },
+    })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    
+    if (!over || active.id === over.id) return;
+
+    const activeData = active.data.current;
+    const overData = over.data.current;
+
+    if (activeData?.type === 'tab' && overData?.type === 'tab') {
+      const oldIndex = activeData.index as number;
+      const newIndex = overData.index as number;
+      
+      console.log('[HEADER] Reordering tab from', oldIndex, 'to', newIndex);
+      reorderTabs(oldIndex, newIndex);
+    }
+  };
+
   const toggleSidebar = () => {
     updateConfig({ sidebarOpen: !config.sidebarOpen });
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     // Only trigger on the header itself, not on interactive elements
+    console.log("DOUBE CLICK TRIGGERED!")
     if ((e.target as HTMLElement).closest('.no-drag')) return;
     
     if (typeof window !== 'undefined' && window.go && window.go.main && window.go.main.App) {
@@ -48,6 +84,7 @@ export const Header: React.FC = () => {
 
   // Terminal tab handlers
   const handleTabSelect = (tabId: string) => {
+    console.log("HANDLE TAB SELECT",tabId)
     setActiveTab(tabId);
     // Navigate to terminal page if not already there
     if (!isTerminalPage) {
@@ -86,16 +123,26 @@ export const Header: React.FC = () => {
 
   const handleCloseAll = () => tabs.forEach((t) => removeTab(t.id));
   
-  const getSessionType = (sessionId: string) => sessions.get(sessionId)?.type;
+  const getSessionType = (tabId: string) => {
+    const tab = tabs.find(t => t.id === tabId);
+    if (!tab) return undefined;
+    const sessionId = getActiveSessionId(tab);
+    if (!sessionId) return undefined;
+    return sessions.get(sessionId)?.type;
+  };
 
   // Check if there are any local terminal tabs open
   const hasLocalTerminal = tabs.some(tab => {
-    const session = sessions.get(tab.sessionId);
+    const sessionId = getActiveSessionId(tab);
+    if (!sessionId) return false;
+    const session = sessions.get(sessionId);
     return session?.type === 'local'; // Using string value instead of enum for safety
   });
 
   const hasSSHTerminal = tabs.some(tab => {
-    const session = sessions.get(tab.sessionId);
+    const sessionId = getActiveSessionId(tab);
+    if (!sessionId) return false;
+    const session = sessions.get(sessionId);
     return session?.type === 'ssh'; // Using string value instead of enum for safety
   });
 
@@ -130,39 +177,35 @@ export const Header: React.FC = () => {
           </button>
         </div>
 
-        {/* App title - always visible but compact when tabs exist
-        <div
-          className="flex items-center gap-2 flex-shrink-0 titlebar"
-          onDoubleClick={handleDoubleClick}
-        >
-          <span
-            onClick={handleHeaderClick}
-            className="no-drag text-sm font-semibold text-text-primary select-none hover:text-primary transition-colors duration-200 cursor-pointer"
-          >
-            Host Vault
-          </span>
-        </div> */}
-
         {/* Separator */}
         <div className="h-5 w-px bg-border/50 flex-shrink-0" />
 
         {/* Terminal tabs - always visible */}
-        <div className="flex-1 min-w-0 no-drag overflow-hidden h-full flex items-center gap-2">
+        <div 
+          className="flex-1 min-w-0 no-drag overflow-hidden h-full flex items-center gap-2"
+          style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}
+        >
           {tabs.length > 0 && (
-            <TabBar
-              tabs={tabs}
-              activeTabId={isTerminalPage ? activeTabId : null}
-              onTabActivate={handleTabSelect}
-              onTabClose={handleTabClose}
-              onTabRename={handleTabRename}
-              onTabReorder={handleTabReorder}
-              onTabDuplicate={handleTabDuplicate}
-              onNewTab={handleNewTab}
-              onCloseOthers={handleCloseOthers}
-              onCloseRight={handleCloseRight}
-              onCloseAll={handleCloseAll}
-              getSessionType={getSessionType}
-            />
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <TabBar
+                tabs={tabs}
+                activeTabId={isTerminalPage ? activeTabId : null}
+                onTabActivate={handleTabSelect}
+                onTabClose={handleTabClose}
+                onTabRename={handleTabRename}
+                onTabReorder={handleTabReorder}
+                onTabDuplicate={handleTabDuplicate}
+                onNewTab={handleNewTab}
+                onCloseOthers={handleCloseOthers}
+                onCloseRight={handleCloseRight}
+                onCloseAll={handleCloseAll}
+                getSessionType={getSessionType}
+              />
+            </DndContext>
           )}
           {/* Show "Open Terminal" button only when no local terminals are open */}
           {!hasLocalTerminal && (
