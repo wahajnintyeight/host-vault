@@ -119,7 +119,7 @@ export const TerminalPage: React.FC = () => {
   }, []);
 
   return (
-    <div className="h-full bg-background relative overflow-hidden -m-8">
+    <div className="h-full bg-background relative overflow-hidden">
       {/* Terminal area */}
       <div className="absolute inset-0">
         {/* Connecting animation overlay */}

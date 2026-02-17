@@ -7,27 +7,28 @@ import { SessionType, TerminalTab } from '../../types/terminal';
 import { QuickConnectModal } from '../connections/QuickConnectModal';
 import { PasswordPromptModal } from '../connections/PasswordPromptModal';
 import { getActiveSessionId } from '../../lib/terminalUtils';
-import { 
-  DndContext, 
-  DragEndEvent, 
-  DragOverlay, 
+import {
+  DndContext,
+  DragEndEvent,
+  DragOverlay,
   DragStartEvent,
   DragMoveEvent,
   PointerSensor,
   useSensor,
   useSensors,
+  MeasuringStrategy,
   defaultDropAnimationSideEffects,
   DropAnimation,
   DragOverEvent,
   pointerWithin,
   rectIntersection,
-  closestCenter,
   CollisionDetection,
 } from '@dnd-kit/core';
 
 interface TerminalTabProps {
   tab: TerminalTab;
   activeTabId: string | null;
+  isDragging: boolean;
   dropTarget: {
     paneId: string;
     direction: 'top' | 'bottom' | 'left' | 'right';
@@ -35,12 +36,19 @@ interface TerminalTabProps {
 }
 
 const TerminalTabComponent = React.memo<TerminalTabProps>(
-  ({ tab, activeTabId, dropTarget }) => {
+  ({ tab, activeTabId, isDragging, dropTarget }) => {
     const isActive = tab.id === activeTabId;
 
     return (
-      <div className={`absolute inset-0 ${isActive ? '' : 'invisible pointer-events-none'}`}>
-        <SplitPane 
+      <div
+        className="absolute inset-0"
+        style={{
+          opacity: isActive ? 1 : 0,
+          pointerEvents: isActive || isDragging ? 'auto' : 'none',
+          zIndex: isActive ? 1 : 0,
+        }}
+      >
+        <SplitPane
           node={tab.layout}
           tabId={tab.id}
           isVisible={isActive}
@@ -54,6 +62,7 @@ const TerminalTabComponent = React.memo<TerminalTabProps>(
       prev.tab.id === next.tab.id &&
       prev.tab.layout === next.tab.layout &&
       prev.activeTabId === next.activeTabId &&
+      prev.isDragging === next.isDragging &&
       prev.dropTarget?.paneId === next.dropTarget?.paneId &&
       prev.dropTarget?.direction === next.dropTarget?.direction
     );
@@ -72,15 +81,14 @@ const getDropDirection = (
   const { left, top, width, height } = rect;
   const x = clientX - left;
   const y = clientY - top;
-  
-  // Calculate distances to each edge
+
   const distTop = y;
   const distBottom = height - y;
   const distLeft = x;
   const distRight = width - x;
-  
+
   const minDist = Math.min(distTop, distBottom, distLeft, distRight);
-  
+
   if (minDist === distTop) return 'top';
   if (minDist === distBottom) return 'bottom';
   if (minDist === distLeft) return 'left';
@@ -108,11 +116,29 @@ const getClientPoint = (e: unknown): { x: number; y: number } | null => {
 
 const collisionDetection: CollisionDetection = (args) => {
   const pointer = pointerWithin(args);
-  if (pointer.length) return pointer;
+
+  if (pointer.length > 0) {
+    const paneCollision = pointer.find((c) =>
+      String(c.id).startsWith('pane-')
+    );
+    if (paneCollision) {
+      return [paneCollision];
+    }
+    return pointer;
+  }
+
   const intersection = rectIntersection(args);
-  if (intersection.length) return intersection;
-  console.log('collission detection')
-  return closestCenter(args);
+  if (intersection.length > 0) {
+    const paneCollision = intersection.find((c) =>
+      String(c.id).startsWith('pane-')
+    );
+    if (paneCollision) {
+      return [paneCollision];
+    }
+    return intersection;
+  }
+
+  return [];
 };
 
 export const TerminalContainer: React.FC = () => {
@@ -136,7 +162,7 @@ export const TerminalContainer: React.FC = () => {
     tabId: string | null;
     timeoutId: number | null;
   }>({ tabId: null, timeoutId: null });
-  
+
   const {
     tabs,
     activeTabId,
@@ -154,18 +180,13 @@ export const TerminalContainer: React.FC = () => {
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 3,
-      },
-      onActivation: (event) => {
-        console.log('[SENSOR] Drag activated!', event);
+        distance: 8,
       },
     })
   );
 
   useEffect(() => {
-    console.log('[TERM] TerminalContainer component mounted');
     return () => {
-      console.log('[TERM] TerminalContainer component unmounting');
       cleanupAllTerminalInstances();
     };
   }, []);
@@ -178,16 +199,12 @@ export const TerminalContainer: React.FC = () => {
 
       if (e.ctrlKey && e.key === 't') {
         e.preventDefault();
-        console.log('[TERM] Keyboard shortcut: New tab (Ctrl+T)');
-        createLocalTerminal().catch((error) => {
-          console.error('Failed to create new terminal:', error);
-        });
+        createLocalTerminal().catch(console.error);
         return;
       }
 
       if (e.ctrlKey && e.key === 'w') {
         e.preventDefault();
-        console.log('[TERM] Keyboard shortcut: Close tab (Ctrl+W)', activeTabId);
         if (activeTabId) {
           removeTab(activeTabId);
         }
@@ -199,7 +216,6 @@ export const TerminalContainer: React.FC = () => {
         if (tabs.length > 0 && activeTabId) {
           const currentIndex = tabs.findIndex((t) => t.id === activeTabId);
           const nextIndex = (currentIndex + 1) % tabs.length;
-          console.log('[TERM] Keyboard shortcut: Next tab (Ctrl+Tab)', tabs[nextIndex].id);
           setActiveTab(tabs[nextIndex].id);
         }
         return;
@@ -210,7 +226,6 @@ export const TerminalContainer: React.FC = () => {
         if (tabs.length > 0 && activeTabId) {
           const currentIndex = tabs.findIndex((t) => t.id === activeTabId);
           const prevIndex = currentIndex === 0 ? tabs.length - 1 : currentIndex - 1;
-          console.log('[TERM] Keyboard shortcut: Previous tab (Ctrl+Shift+Tab)', tabs[prevIndex].id);
           setActiveTab(tabs[prevIndex].id);
         }
         return;
@@ -231,248 +246,250 @@ export const TerminalContainer: React.FC = () => {
     hoverActivateRef.current = { tabId: null, timeoutId: null };
   }, []);
 
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    console.log('dragStart', event.active.id);
-    console.log('[DND] Active data:', event.active.data.current);
-    const { active } = event;
-    const tab = tabs.find(t => t.id === active.id);
-    if (tab) {
-      console.log('[DND] Found tab to drag:', tab.title);
-      setActiveDragTab(tab);
-    } else {
-      console.warn('[DND] Tab not found for id:', active.id);
-    }
-    lastPointerRef.current = getClientPoint(event.activatorEvent);
-  }, [tabs]);
+  const handleDragStart = useCallback(
+    (event: DragStartEvent) => {
+      const { active } = event;
+      const tab = tabs.find((t) => t.id === active.id);
+      if (tab) {
+        setActiveDragTab(tab);
+      }
+      lastPointerRef.current = getClientPoint(event.activatorEvent);
+    },
+    [tabs]
+  );
 
   const handleDragMove = useCallback((event: DragMoveEvent) => {
-    console.log("handle drag move")
     const point = getClientPoint(event.activatorEvent);
     if (point) lastPointerRef.current = point;
   }, []);
 
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const { active, over } = event;
-    setActiveDragTab(null);
-    setDropTarget(null);
-    clearHoverActivate();
-    console.log("handle drag end")
-
-    if (!over) return;
-
-    const sourceTabId = active.id as string;
-    const overData = over.data.current;
-    const activeData = active.data.current;
-
-    // Check if it's a tab being reordered within the tab bar
-    if (activeData?.type === 'tab' && overData?.type === 'tab') {
-      const oldIndex = activeData.index as number;
-      const newIndex = overData.index as number;
-      
-      if (oldIndex !== newIndex) {
-        console.log('[DND] Reordering tab from', oldIndex, 'to', newIndex);
-        reorderTabs(oldIndex, newIndex);
-      }
-      return;
-    }
-
-    // Check if dropped on a pane (for merging)
-    if (overData?.type === 'pane' && activeData?.type === 'tab') {
-      const targetPaneId = overData.paneId as string;
-      const targetTabId = overData.tabId as string;
-      
-      // Don't drop on itself
-      if (sourceTabId === targetTabId) return;
-
-      const point = lastPointerRef.current;
-      const rect = over.rect as RectLike | null;
-      if (!point || !rect) return;
-
-      const direction = getDropDirection(point.x, point.y, rect);
-      console.log(
-        '[DND] Merging tab',
-        sourceTabId,
-        'into',
-        targetTabId,
-        'direction:',
-        direction
-      );
-      mergeTabs(sourceTabId, targetTabId, targetPaneId, direction);
-    }
-  }, [clearHoverActivate, mergeTabs, reorderTabs]);
-
-  const handleDragOver = useCallback((event: DragOverEvent) => {
-    const { over, active } = event;
-    
-    console.log('[DND] DragOver - over:', over?.id, 'active:', active.id);
-    
-    if (!over) {
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      setActiveDragTab(null);
       setDropTarget(null);
       clearHoverActivate();
-      return;
-    }
 
-    const overData = over.data.current;
-    const activeData = active.data.current;
-    
-    console.log('[DND] Over data:', overData, 'Active data:', activeData);
+      if (!over) return;
 
-    if (activeData?.type === 'tab' && overData?.type === 'tab') {
-      const overTabId = over.id as string;
-      if (overTabId !== hoverActivateRef.current.tabId) {
-        clearHoverActivate();
-        hoverActivateRef.current.tabId = overTabId;
-        hoverActivateRef.current.timeoutId = window.setTimeout(() => {
-          setActiveTab(overTabId);
-        }, 350);
+      const sourceTabId = active.id as string;
+      const overData = over.data.current;
+      const activeData = active.data.current;
+
+      if (activeData?.type === 'tab' && overData?.type === 'tab') {
+        const oldIndex = activeData.index as number;
+        const newIndex = overData.index as number;
+
+        if (oldIndex !== newIndex) {
+          reorderTabs(oldIndex, newIndex);
+        }
+        return;
       }
-    } else {
-      clearHoverActivate();
-    }
-    
-    if (overData?.type === 'pane' && activeData?.type === 'tab') {
-      console.log('[DND] Hovering over pane:', overData.paneId);
-      const point = lastPointerRef.current ?? getClientPoint(event.activatorEvent);
-      const rect = over.rect as RectLike | null;
-      if (!point || !rect) return;
 
-      const direction = getDropDirection(point.x, point.y, rect);
-      console.log('[DND] Drop direction:', direction);
-      setDropTarget((prev) => {
-        const next = {
+      if (overData?.type === 'pane' && activeData?.type === 'tab') {
+        const targetPaneId = overData.paneId as string;
+        const targetTabId = overData.tabId as string;
+
+        if (sourceTabId === targetTabId) return;
+
+        const point = lastPointerRef.current;
+        const rect = over.rect as RectLike | null;
+        if (!point || !rect) return;
+
+        const direction = getDropDirection(point.x, point.y, rect);
+        mergeTabs(sourceTabId, targetTabId, targetPaneId, direction);
+      }
+    },
+    [clearHoverActivate, mergeTabs, reorderTabs]
+  );
+
+  const handleDragOver = useCallback(
+    (event: DragOverEvent) => {
+      const { over, active } = event;
+
+      if (!over) {
+        setDropTarget(null);
+        clearHoverActivate();
+        return;
+      }
+
+      const overData = over.data.current;
+      const activeData = active.data.current;
+
+      if (activeData?.type === 'tab' && overData?.type === 'tab') {
+        const overTabId = over.id as string;
+        if (overTabId !== hoverActivateRef.current.tabId) {
+          clearHoverActivate();
+          hoverActivateRef.current.tabId = overTabId;
+          hoverActivateRef.current.timeoutId = window.setTimeout(() => {
+            setActiveTab(overTabId);
+          }, 350);
+        }
+        setDropTarget(null);
+      } else if (overData?.type === 'pane' && activeData?.type === 'tab') {
+        clearHoverActivate();
+        const point = lastPointerRef.current ?? getClientPoint(event.activatorEvent);
+        const rect = over.rect as RectLike | null;
+        if (!point || !rect) return;
+
+        const direction = getDropDirection(point.x, point.y, rect);
+        setDropTarget({
           paneId: overData.paneId as string,
           tabId: overData.tabId as string,
           direction,
-        };
-        if (
-          prev?.paneId === next.paneId &&
-          prev?.tabId === next.tabId &&
-          prev?.direction === next.direction
-        ) {
-          return prev;
-        }
-        return next;
-      });
-    } else {
-      setDropTarget(null);
-    }
-  }, [clearHoverActivate, setActiveTab]);
+        });
+      } else {
+        clearHoverActivate();
+        setDropTarget(null);
+      }
+    },
+    [clearHoverActivate, setActiveTab]
+  );
 
-  const handleTabClose = useCallback((tabId: string) => {
-    console.log('[TERM] Closing tab:', tabId);
-    removeTab(tabId);
-  }, [removeTab]);
+  const handleTabClose = useCallback(
+    (tabId: string) => {
+      removeTab(tabId);
+    },
+    [removeTab]
+  );
 
-  const handleTabSelect = useCallback((tabId: string) => {
-    console.log('[TERM] Switching to tab:', tabId);
-    setActiveTab(tabId);
-  }, [setActiveTab]);
+  const handleTabSelect = useCallback(
+    (tabId: string) => {
+      setActiveTab(tabId);
+    },
+    [setActiveTab]
+  );
 
-  const handleTabRename = useCallback((tabId: string, newTitle: string) => {
-    updateTabTitle(tabId, newTitle);
-  }, [updateTabTitle]);
+  const handleTabRename = useCallback(
+    (tabId: string, newTitle: string) => {
+      updateTabTitle(tabId, newTitle);
+    },
+    [updateTabTitle]
+  );
 
-  const handleTabReorder = useCallback((fromIndex: number, toIndex: number) => {
-    reorderTabs(fromIndex, toIndex);
-  }, [reorderTabs]);
+  const handleTabReorder = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      reorderTabs(fromIndex, toIndex);
+    },
+    [reorderTabs]
+  );
 
-  const handleTabDuplicate = useCallback((tabId: string) => {
-    duplicateTab(tabId).catch((error) => {
-      console.error('Failed to duplicate tab:', error);
-    });
-  }, [duplicateTab]);
+  const handleTabDuplicate = useCallback(
+    (tabId: string) => {
+      duplicateTab(tabId).catch(console.error);
+    },
+    [duplicateTab]
+  );
 
   const handleNewTab = useCallback(() => {
-    console.log('[TERM] Creating new terminal tab');
-    createLocalTerminal().catch((error) => {
-      console.error('Failed to create new terminal:', error);
-    });
+    createLocalTerminal().catch(console.error);
   }, [createLocalTerminal]);
 
-  const handleQuickConnect = useCallback((username: string, host: string, port: number) => {
-    setPendingConnection({ username, host, port });
-    setIsConnecting(true);
-    
-    createQuickSSHTerminal(username, host, port)
-      .then(() => {
-        setIsConnecting(false);
-        setShowQuickConnect(false);
-        setPendingConnection(null);
-        setShowPasswordPrompt(false);
-      })
-      .catch((error: any) => {
-        if (error?.message?.includes('permission denied') || error?.message?.includes('auth')) {
+  const handleQuickConnect = useCallback(
+    (username: string, host: string, port: number) => {
+      setPendingConnection({ username, host, port });
+      setIsConnecting(true);
+
+      createQuickSSHTerminal(username, host, port)
+        .then(() => {
           setIsConnecting(false);
           setShowQuickConnect(false);
-          setShowPasswordPrompt(true);
-        } else {
-          setIsConnecting(false);
           setPendingConnection(null);
-          setShowQuickConnect(false);
           setShowPasswordPrompt(false);
-          console.error('Failed to connect:', error);
-        }
-      });
-  }, [createQuickSSHTerminal]);
+        })
+        .catch((error: Error) => {
+          if (
+            error?.message?.includes('permission denied') ||
+            error?.message?.includes('auth')
+          ) {
+            setIsConnecting(false);
+            setShowQuickConnect(false);
+            setShowPasswordPrompt(true);
+          } else {
+            setIsConnecting(false);
+            setPendingConnection(null);
+            setShowQuickConnect(false);
+            setShowPasswordPrompt(false);
+            console.error('Failed to connect:', error);
+          }
+        });
+    },
+    [createQuickSSHTerminal]
+  );
 
-  const handlePasswordSubmit = useCallback((password: string) => {
-    if (!pendingConnection) return;
-    
-    setIsConnecting(true);
-    createQuickSSHTerminal(
-      pendingConnection.username,
-      pendingConnection.host,
-      pendingConnection.port,
-      password
-    )
-      .then(() => {
-        setIsConnecting(false);
-        setShowPasswordPrompt(false);
-        setPendingConnection(null);
-      })
-      .catch((error) => {
-        setIsConnecting(false);
-        console.error('Failed to connect with password:', error);
-      });
-  }, [pendingConnection, createQuickSSHTerminal]);
+  const handlePasswordSubmit = useCallback(
+    (password: string) => {
+      if (!pendingConnection) return;
 
-  const handleCloseOthers = useCallback((tabId: string) => {
-    const tabsToClose = tabs.filter(t => t.id !== tabId);
-    tabsToClose.forEach(t => removeTab(t.id));
-  }, [tabs, removeTab]);
+      setIsConnecting(true);
+      createQuickSSHTerminal(
+        pendingConnection.username,
+        pendingConnection.host,
+        pendingConnection.port,
+        password
+      )
+        .then(() => {
+          setIsConnecting(false);
+          setShowPasswordPrompt(false);
+          setPendingConnection(null);
+        })
+        .catch((error) => {
+          setIsConnecting(false);
+          console.error('Failed to connect with password:', error);
+        });
+    },
+    [pendingConnection, createQuickSSHTerminal]
+  );
 
-  const handleCloseRight = useCallback((tabId: string) => {
-    const tabIndex = tabs.findIndex(t => t.id === tabId);
-    if (tabIndex === -1) return;
+  const handleCloseOthers = useCallback(
+    (tabId: string) => {
+      const tabsToClose = tabs.filter((t) => t.id !== tabId);
+      tabsToClose.forEach((t) => removeTab(t.id));
+    },
+    [tabs, removeTab]
+  );
 
-    const tabsToClose = tabs.slice(tabIndex + 1);
-    tabsToClose.forEach(t => removeTab(t.id));
-  }, [tabs, removeTab]);
+  const handleCloseRight = useCallback(
+    (tabId: string) => {
+      const tabIndex = tabs.findIndex((t) => t.id === tabId);
+      if (tabIndex === -1) return;
+
+      const tabsToClose = tabs.slice(tabIndex + 1);
+      tabsToClose.forEach((t) => removeTab(t.id));
+    },
+    [tabs, removeTab]
+  );
 
   const handleCloseAll = useCallback(() => {
-    tabs.forEach(t => removeTab(t.id));
+    tabs.forEach((t) => removeTab(t.id));
   }, [tabs, removeTab]);
 
-  const getSessionType = useCallback((tabId: string) => {
-    const tab = tabs.find(t => t.id === tabId);
-    if (!tab) return undefined;
-    const sessionId = getActiveSessionId(tab);
-    if (!sessionId) return undefined;
-    return sessions.get(sessionId)?.type;
-  }, [sessions, tabs]);
+  const getSessionType = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((t) => t.id === tabId);
+      if (!tab) return undefined;
+      const sessionId = getActiveSessionId(tab);
+      if (!sessionId) return undefined;
+      return sessions.get(sessionId)?.type;
+    },
+    [sessions, tabs]
+  );
+
+  const isDragging = activeDragTab !== null;
 
   return (
     <DndContext
       sensors={sensors}
       collisionDetection={collisionDetection}
       onDragStart={handleDragStart}
+      measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
       onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}
       onDragOver={handleDragOver}
     >
-      <div 
+      <div
         ref={containerRef}
-        className="flex flex-col h-full w-full bg-[#0f172a]"
+        className="flex flex-col h-full w-full bg-background min-h-0"
         tabIndex={-1}
       >
         <TabBar
@@ -490,16 +507,14 @@ export const TerminalContainer: React.FC = () => {
           onCloseAll={handleCloseAll}
           getSessionType={getSessionType}
         />
-        <div className="flex-1 overflow-hidden relative">
+        <div className="flex-1 overflow-hidden relative min-h-0">
           {tabs.map((tab) => (
             <TerminalTabComponent
               key={tab.id}
               tab={tab}
               activeTabId={activeTabId}
-              dropTarget={
-                // Show drop target on the active tab when dragging
-                tab.id === activeTabId && activeDragTab ? dropTarget : null
-              }
+              isDragging={isDragging}
+              dropTarget={dropTarget?.tabId === tab.id ? dropTarget : null}
             />
           ))}
         </div>
@@ -529,7 +544,7 @@ export const TerminalContainer: React.FC = () => {
         )}
       </div>
 
-      <DragOverlay dropAnimation={dropAnimation}>
+      <DragOverlay dropAnimation={dropAnimation} style={{ pointerEvents: 'none' }}>
         {activeDragTab ? (
           <div className="flex items-center gap-2 px-4 py-2 bg-background-light border border-primary/50 rounded-lg shadow-2xl opacity-90 scale-105 cursor-grabbing">
             <span className="text-text-primary font-medium">

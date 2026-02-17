@@ -42,11 +42,11 @@ export const TabBar: React.FC<TabBarProps> = ({
 }) => {
   return (
     <div
-      className="flex items-center h-full bg-transparent"
+      className="flex items-center h-10 flex-shrink-0 bg-transparent relative z-20"
       style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}
     >
       {/* Scrollable tab container */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden h-full">
+      <div className="flex-1 overflow-x-auto overflow-y-hidden h-full  [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         <SortableContext
           items={tabs.map((tab) => tab.id)}
           strategy={horizontalListSortingStrategy}

@@ -24,11 +24,11 @@ func main() {
 			log.Printf("Make sure your .env file is UTF-8 encoded without BOM (Byte Order Mark)")
 		}
 	}
-	// If .env doesn't exist, silently continue (it's optional)
 
+	
+	// If .env doesn't exist, silently continue (it's optional)
 	// Create an instance of the app structure
 	app := NewApp()
-
 	// Create application with options
 	err := wails.Run(&options.App{
 		Title:  "Host Vault",
