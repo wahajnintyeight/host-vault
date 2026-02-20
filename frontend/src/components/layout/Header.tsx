@@ -10,11 +10,6 @@ import { TabBar } from '../terminal/TabBar';
 import { useTerminalStore } from '../../store/terminalStore';
 import { getActiveSessionId } from '../../lib/terminalUtils';
 import {
-  DndContext,
-  DragEndEvent,
-  PointerSensor,
-  useSensor,
-  useSensors,
   closestCenter,
 } from '@dnd-kit/core';
 
@@ -37,31 +32,6 @@ export const Header: React.FC = () => {
   } = useTerminalStore();
 
   const isTerminalPage = location.pathname === ROUTES.TERMINAL;
-
-  // DnD sensors for tab reordering
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 3,
-      },
-    })
-  );
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    
-    if (!over || active.id === over.id) return;
-
-    const activeData = active.data.current;
-    const overData = over.data.current;
-
-    if (activeData?.type === 'tab' && overData?.type === 'tab') {
-      const oldIndex = activeData.index as number;
-      const newIndex = overData.index as number;
-      
-      reorderTabs(oldIndex, newIndex);
-    }
-  };
 
   const toggleSidebar = () => {
     updateConfig({ sidebarOpen: !config.sidebarOpen });
@@ -183,26 +153,20 @@ export const Header: React.FC = () => {
           style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}
         >
           {tabs.length > 0 && (
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
-            >
-              <TabBar
-                tabs={tabs}
-                activeTabId={isTerminalPage ? activeTabId : null}
-                onTabActivate={handleTabSelect}
-                onTabClose={handleTabClose}
-                onTabRename={handleTabRename}
-                onTabReorder={handleTabReorder}
-                onTabDuplicate={handleTabDuplicate}
-                onNewTab={handleNewTab}
-                onCloseOthers={handleCloseOthers}
-                onCloseRight={handleCloseRight}
-                onCloseAll={handleCloseAll}
-                getSessionType={getSessionType}
-              />
-            </DndContext>
+            <TabBar
+              tabs={tabs}
+              activeTabId={isTerminalPage ? activeTabId : null}
+              onTabActivate={handleTabSelect}
+              onTabClose={handleTabClose}
+              onTabRename={handleTabRename}
+              onTabReorder={handleTabReorder}
+              onTabDuplicate={handleTabDuplicate}
+              onNewTab={handleNewTab}
+              onCloseOthers={handleCloseOthers}
+              onCloseRight={handleCloseRight}
+              onCloseAll={handleCloseAll}
+              getSessionType={getSessionType}
+            />
           )}
           {/* Show "Open Terminal" button only when no local terminals are open */}
           {!hasLocalTerminal && (

@@ -10,6 +10,8 @@ import { useDroppable } from '@dnd-kit/core';
 import { clsx } from 'clsx';
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react';
 
+import { TerminalHandle } from './Terminal';
+
 interface SplitPaneProps {
   node: LayoutNode;
   tabId: string;
@@ -18,6 +20,7 @@ interface SplitPaneProps {
     paneId: string;
     direction: 'top' | 'bottom' | 'left' | 'right';
   } | null;
+  onTerminalRef?: (sessionId: string, handle: TerminalHandle | null) => void;
 }
 
 interface DropIndicatorProps {
@@ -60,19 +63,29 @@ const Pane: React.FC<{
   tabId: string;
   isVisible: boolean;
   dropTarget: SplitPaneProps['dropTarget'];
-}> = ({ node, tabId, isVisible, dropTarget }) => {
+  onTerminalRef?: (sessionId: string, handle: TerminalHandle | null) => void;
+}> = ({ node, tabId, isVisible, dropTarget, onTerminalRef }) => {
   const { setActivePane, activePaneId } = useTerminalStore();
   const isActive = activePaneId === node.id;
   const showIndicator = dropTarget?.paneId === node.id;
 
   const { setNodeRef, isOver, active } = useDroppable({
     id: `pane-${node.id}`,
+    disabled: !isVisible,
     data: {
       type: 'pane',
       paneId: node.id,
       tabId: tabId,
     },
   });
+
+  if (isOver && active) {
+    console.log('[Terminal DnD] pane droppable over', {
+      paneId: node.id,
+      tabId: tabId,
+      activeId: active.id,
+    });
+  }
 
   return (
     <div
@@ -84,7 +97,13 @@ const Pane: React.FC<{
       )}
       onClick={() => setActivePane(node.id)}
     >
-      <Terminal sessionId={node.sessionId} isVisible={isVisible} />
+      <Terminal 
+        sessionId={node.sessionId} 
+        isVisible={isVisible} 
+        ref={React.useCallback((handle: TerminalHandle | null) => {
+          onTerminalRef?.(node.sessionId, handle);
+        }, [node.sessionId, onTerminalRef])}
+      />
 
       {showIndicator && dropTarget.direction && (
         <DropIndicator direction={dropTarget.direction} />
@@ -98,6 +117,7 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
   tabId,
   isVisible,
   dropTarget,
+  onTerminalRef,
 }) => {
   if ('sessionId' in node) {
     return (
@@ -106,6 +126,7 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
         tabId={tabId}
         isVisible={isVisible}
         dropTarget={dropTarget}
+        onTerminalRef={onTerminalRef}
       />
     );
   }
@@ -130,6 +151,7 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
               tabId={tabId}
               isVisible={isVisible}
               dropTarget={dropTarget}
+              onTerminalRef={onTerminalRef}
             />
           </div>
 

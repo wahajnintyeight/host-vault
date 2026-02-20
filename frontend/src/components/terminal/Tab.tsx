@@ -103,10 +103,6 @@ export const Tab: React.FC<TabProps> = ({
     setContextMenu({ x: e.clientX, y: e.clientY });
   };
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    listeners?.onPointerDown?.(e);
-  };
-
   const handleContextMenuAction = (action: TabAction) => {
     switch (action) {
       case TabAction.Rename:
@@ -160,7 +156,6 @@ export const Tab: React.FC<TabProps> = ({
       <div
         ref={setNodeRef}
         {...attributes}
-        {...listeners}
         style={{
           ...style,
           touchAction: 'none',
@@ -178,11 +173,11 @@ export const Tab: React.FC<TabProps> = ({
         onClick={onActivate}
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
-        onPointerDown={handlePointerDown}
       >
         {/* Drag Handle - Visual affordance only */}
         <div
           className="flex-shrink-0 cursor-grab active:cursor-grabbing p-1 -ml-1 rounded hover:bg-background-lighter text-text-muted hover:text-text-primary transition-colors"
+          {...listeners}
         >
           <GripVertical className="w-3.5 h-3.5" />
         </div>

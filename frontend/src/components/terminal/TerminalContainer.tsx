@@ -251,6 +251,10 @@ export const TerminalContainer: React.FC = () => {
       const { active } = event;
       const tab = tabs.find((t) => t.id === active.id);
       if (tab) {
+        console.log('[Terminal DnD] drag start', {
+          tabId: tab.id,
+          title: tab.title,
+        });
         setActiveDragTab(tab);
       }
       lastPointerRef.current = getClientPoint(event.activatorEvent);
@@ -260,12 +264,24 @@ export const TerminalContainer: React.FC = () => {
 
   const handleDragMove = useCallback((event: DragMoveEvent) => {
     const point = getClientPoint(event.activatorEvent);
-    if (point) lastPointerRef.current = point;
+    if (point) {
+      lastPointerRef.current = point;
+      console.log('[Terminal DnD] drag move', {
+        x: point.x,
+        y: point.y,
+        activeId: event.active.id,
+      });
+    }
   }, []);
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const { active, over } = event;
+      console.log('[Terminal DnD] drag end', {
+        activeId: active.id,
+        overId: over?.id ?? null,
+        overType: over?.data.current?.type ?? null,
+      });
       setActiveDragTab(null);
       setDropTarget(null);
       clearHoverActivate();
@@ -308,6 +324,9 @@ export const TerminalContainer: React.FC = () => {
       const { over, active } = event;
 
       if (!over) {
+        console.log('[Terminal DnD] drag over: no target', {
+          activeId: active.id,
+        });
         setDropTarget(null);
         clearHoverActivate();
         return;
@@ -318,6 +337,10 @@ export const TerminalContainer: React.FC = () => {
 
       if (activeData?.type === 'tab' && overData?.type === 'tab') {
         const overTabId = over.id as string;
+        console.log('[Terminal DnD] over tab', {
+          activeId: active.id,
+          overTabId,
+        });
         if (overTabId !== hoverActivateRef.current.tabId) {
           clearHoverActivate();
           hoverActivateRef.current.tabId = overTabId;
@@ -333,12 +356,23 @@ export const TerminalContainer: React.FC = () => {
         if (!point || !rect) return;
 
         const direction = getDropDirection(point.x, point.y, rect);
+        console.log('[Terminal DnD] over pane', {
+          activeId: active.id,
+          paneId: overData.paneId,
+          tabId: overData.tabId,
+          direction,
+        });
         setDropTarget({
           paneId: overData.paneId as string,
           tabId: overData.tabId as string,
           direction,
         });
       } else {
+        console.log('[Terminal DnD] over unknown target', {
+          activeId: active.id,
+          overId: over.id,
+          overType: overData?.type ?? null,
+        });
         clearHoverActivate();
         setDropTarget(null);
       }
@@ -546,8 +580,8 @@ export const TerminalContainer: React.FC = () => {
 
       <DragOverlay dropAnimation={dropAnimation} style={{ pointerEvents: 'none' }}>
         {activeDragTab ? (
-          <div className="flex items-center gap-2 px-4 py-2 bg-background-light border border-primary/50 rounded-lg shadow-2xl opacity-90 scale-105 cursor-grabbing">
-            <span className="text-text-primary font-medium">
+          <div className="flex items-center gap-2 px-4 py-2 bg-background-light border border-primary/50 rounded-lg shadow-2xl opacity-90 scale-105 pointer-events-none">
+            <span className="text-text-primary font-medium pointer-events-none">
               {activeDragTab.title}
             </span>
           </div>

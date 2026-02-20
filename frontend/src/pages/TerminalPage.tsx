@@ -1,58 +1,66 @@
-import React, { useRef, useState, useEffect, useCallback, useMemo, memo } from 'react';
+import React, { useRef, useState, useEffect, useCallback, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTerminalStore } from '../store/terminalStore';
-import Terminal, { TerminalHandle } from '../components/terminal/Terminal';
+import { TerminalHandle } from '../components/terminal/Terminal';
 import { PanelRightOpen, PanelRightClose, Server } from 'lucide-react';
 import { TerminalDrawer } from '../components/terminal/TerminalDrawer';
 import { ROUTES } from '../lib/constants';
 import { getActiveSessionId } from '../lib/terminalUtils';
+import { SplitPane } from '../components/terminal/SplitPane';
+import { TerminalTab } from '../types/terminal';
+import { useTerminalDnd } from '../components/terminal/TerminalDndProvider';
 
-/**
- * Memoized terminal wrapper to prevent re-renders when switching tabs
- * Only re-renders when isActive or isDrawerOpen changes for THIS terminal
- */
-interface TerminalWrapperProps {
-  sessionId: string;
-  isActive: boolean;
+interface TerminalTabProps {
+  tab: TerminalTab;
+  activeTabId: string | null;
+  isDragging: boolean;
+  dropTarget: {
+    paneId: string;
+    direction: 'top' | 'bottom' | 'left' | 'right';
+  } | null;
   isDrawerOpen: boolean;
   onTerminalRef: (sessionId: string, handle: TerminalHandle | null) => void;
 }
 
-const TerminalWrapper = memo<TerminalWrapperProps>(({ sessionId, isActive, isDrawerOpen, onTerminalRef }) => {
-  // Get store actions directly - these are stable references
-  const store = useTerminalStore;
+const TerminalTabComponent = memo<TerminalTabProps>(
+  ({ tab, activeTabId, isDragging, dropTarget, isDrawerOpen, onTerminalRef }) => {
+    const isActive = tab.id === activeTabId;
 
-  const handleRef = useCallback((handle: TerminalHandle | null) => {
-    onTerminalRef(sessionId, handle);
-  }, [sessionId, onTerminalRef]);
+    return (
+      <div
+        className="absolute inset-0"
+        style={{
+          visibility: isActive ? 'visible' : 'hidden',
+          pointerEvents: isActive || isDragging ? 'auto' : 'none',
+          zIndex: isActive ? 1 : 0,
+          right: isDrawerOpen ? '288px' : '0px',
+          transition: 'right 0.2s ease-in-out',
+        }}
+      >
+        <SplitPane
+          node={tab.layout}
+          tabId={tab.id}
+          isVisible={isActive}
+          dropTarget={dropTarget}
+          onTerminalRef={onTerminalRef}
+        />
+      </div>
+    );
+  },
+  (prev, next) => {
+    return (
+      prev.tab.id === next.tab.id &&
+      prev.tab.layout === next.tab.layout &&
+      prev.activeTabId === next.activeTabId &&
+      prev.isDragging === next.isDragging &&
+      prev.dropTarget?.paneId === next.dropTarget?.paneId &&
+      prev.dropTarget?.direction === next.dropTarget?.direction &&
+      prev.isDrawerOpen === next.isDrawerOpen
+    );
+  }
+);
 
-  return (
-    <div
-      className="absolute inset-0"
-      style={{
-        visibility: isActive ? 'visible' : 'hidden',
-        pointerEvents: isActive ? 'auto' : 'none',
-        right: isDrawerOpen ? '288px' : '0px',
-        transition: 'right 0.2s ease-in-out'
-      }}
-    >
-      <Terminal
-        ref={handleRef}
-        sessionId={sessionId}
-        isVisible={isActive}
-      />
-    </div>
-  );
-}, (prevProps, nextProps) => {
-  // Custom comparison - only re-render if these specific props change
-  return (
-    prevProps.sessionId === nextProps.sessionId &&
-    prevProps.isActive === nextProps.isActive &&
-    prevProps.isDrawerOpen === nextProps.isDrawerOpen
-  );
-});
-
-TerminalWrapper.displayName = 'TerminalWrapper';
+TerminalTabComponent.displayName = 'TerminalTabComponent';
 
 /**
  * TerminalPage - Terminal content area with sidebar drawer
@@ -65,9 +73,6 @@ export const TerminalPage: React.FC = () => {
   const tabs = useTerminalStore((state) => state.tabs);
   const activeTabId = useTerminalStore((state) => state.activeTabId);
   const connectingSessionId = useTerminalStore((state) => state.connectingSessionId);
-  const createLocalTerminal = useTerminalStore((state) => state.createLocalTerminal);
-  // Get session IDs as a stable array - only changes when sessions are added/removed
-  const sessionIds = useTerminalStore((state) => Array.from(state.sessions.keys()));
   
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
@@ -76,8 +81,11 @@ export const TerminalPage: React.FC = () => {
   const activeSessionId = activeTab ? getActiveSessionId(activeTab) : null;
   const isConnecting = !!connectingSessionId;
 
-  // Memoize session IDs to prevent re-renders when the array content hasn't changed
-  const allSessionIds = useMemo(() => sessionIds, [sessionIds.join(',')]);
+  const { dropTarget, activeDragTab } = useTerminalDnd();
+  const isDragging = activeDragTab !== null;
+
+  // Get the active terminal handle for the drawer
+  const activeTerminalRef = activeSessionId ? terminalRefs.current.get(activeSessionId) : null;
 
   // Stable callback ref handler
   const handleTerminalRef = useCallback((sessionId: string, handle: TerminalHandle | null) => {
@@ -87,9 +95,6 @@ export const TerminalPage: React.FC = () => {
       terminalRefs.current.delete(sessionId);
     }
   }, []);
-
-  // Get the active terminal handle for the drawer
-  const activeTerminalRef = activeSessionId ? terminalRefs.current.get(activeSessionId) : null;
 
   // Listen for navigate-to-home event (when last local terminal closes)
   useEffect(() => {
@@ -148,18 +153,20 @@ export const TerminalPage: React.FC = () => {
         )}
 
         {/* Render ALL terminal instances, hide inactive ones with visibility to preserve scrollback */}
-        {allSessionIds.map((sessionId) => (
-          <TerminalWrapper
-            key={sessionId}
-            sessionId={sessionId}
-            isActive={sessionId === activeSessionId && !isConnecting}
+        {tabs.map((tab) => (
+          <TerminalTabComponent
+            key={tab.id}
+            tab={tab}
+            activeTabId={activeTabId}
+            isDragging={isDragging}
+            dropTarget={dropTarget?.tabId === tab.id ? dropTarget : null}
             isDrawerOpen={isDrawerOpen}
             onTerminalRef={handleTerminalRef}
           />
         ))}
 
         {/* No terminals open - will auto-redirect to home */}
-        {allSessionIds.length === 0 && !isConnecting && (
+        {tabs.length === 0 && !isConnecting && (
           <div className="flex items-center justify-center h-full text-text-muted">
             <div className="text-center">
               <p className="text-sm text-text-muted/70">
