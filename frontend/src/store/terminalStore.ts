@@ -12,6 +12,17 @@ import {
   SessionState,
   TerminalClosedEvent,
 } from "../types/terminal";
+import { Workspace, SerializedSession } from "../types/workspace";
+import {
+  createWorkspace,
+  deserializeTab,
+  updateWorkspaceTimestamp,
+  getWorkspaceMetadata,
+} from "../lib/workspaceSerializer";
+import {
+  loadWorkspacesFromStorage,
+  saveWorkspacesToStorage,
+} from "../lib/workspaceStorage";
 import {
   CreateLocalTerminal,
   CreateSSHTerminal,
@@ -124,6 +135,7 @@ interface TerminalStore {
   activeTabId: string | null;
   activePaneId: string | null; // Track focused pane globally
   connectingSessionId: string | null;
+  workspaces: Workspace[]; // Saved workspaces
 
   // Session management
   addSession: (session: TerminalSession) => void;
@@ -156,8 +168,16 @@ interface TerminalStore {
     targetPaneId: string,
     direction: 'top' | 'bottom' | 'left' | 'right'
   ) => void;
-  closePane: (tabId: string, paneId: string) => void;
+  closePane: (tabId: string, paneId: string, skipBackendCall?: boolean) => void;
   updatePaneSizes: (tabId: string, splitId: string, sizes: number[]) => void;
+  extractPaneToNewTab: (sourceTabId: string, paneId: string) => void;
+  movePaneToPane: (
+    sourceTabId: string,
+    sourcePaneId: string,
+    targetTabId: string,
+    targetPaneId: string,
+    direction: 'top' | 'bottom' | 'left' | 'right'
+  ) => void;
 
   // Terminal operations
   createLocalTerminal: (shell?: string, cwd?: string) => Promise<string>;
@@ -186,6 +206,13 @@ interface TerminalStore {
   ) => Promise<void>;
   setConnecting: (sessionId: string | null) => void;
 
+  // Workspace management
+  saveWorkspace: (name: string, description?: string) => Workspace;
+  loadWorkspace: (workspaceId: string) => Promise<void>;
+  deleteWorkspace: (workspaceId: string) => void;
+  updateWorkspace: (workspaceId: string, name: string, description?: string) => void;
+  getWorkspaces: () => Workspace[];
+
   // Cleanup
   reset: () => void;
 }
@@ -197,6 +224,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   activeTabId: null,
   activePaneId: null,
   connectingSessionId: null,
+  workspaces: loadWorkspacesFromStorage(),
 
   // Session management
   addSession: (session) => {
@@ -509,7 +537,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       });
   },
 
-  closePane: (tabId, paneId) => {
+  closePane: (tabId, paneId, skipBackendCall = false) => {
     set((state) => {
         const tab = state.tabs.find(t => t.id === tabId);
         if (!tab) return state;
@@ -518,12 +546,12 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         const result = findPaneAndParent(tab.layout, paneId);
         if (result && "sessionId" in result.node) {
             const sessionId = result.node.sessionId;
-            // Close the session
-            if (isWailsAvailable()) CloseTerminal(sessionId).catch(console.error);
-            // We should call removeSession too, but we can do it after layout update or let the event listener do it?
-            // Better to do it now.
-            // destroyTerminalInstance(sessionId); // This is imported, might need to be careful with state updates
-            // Defer side effects? No, we can do it.
+            // Close the session (skip if already closed by backend)
+            if (!skipBackendCall && isWailsAvailable()) {
+                CloseTerminal(sessionId).catch(console.error);
+            }
+            // Destroy the terminal instance
+            destroyTerminalInstance(sessionId);
         }
 
         const newLayout = removeNodeFromLayout(tab.layout, paneId);
@@ -562,6 +590,138 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
               tabs: state.tabs.map(t => t.id === tabId ? { ...t, layout: updateSizesRecursive(t.layout) } : t)
           };
       });
+  },
+
+  extractPaneToNewTab: (sourceTabId, paneId) => {
+    set((state) => {
+      const sourceTab = state.tabs.find(t => t.id === sourceTabId);
+      if (!sourceTab) return state;
+
+      const result = findPaneAndParent(sourceTab.layout, paneId);
+      if (!result || !('sessionId' in result.node)) return state;
+
+      const pane = result.node as TerminalPane;
+      const session = state.sessions.get(pane.sessionId);
+      
+      const newTab: TerminalTab = {
+        id: uuid(),
+        layout: { id: uuid(), sessionId: pane.sessionId },
+        title: session?.title || 'Terminal',
+      };
+
+      const newSourceLayout = removeNodeFromLayout(sourceTab.layout, paneId);
+      
+      if (!newSourceLayout) {
+        return {
+          tabs: [newTab, ...state.tabs.filter(t => t.id !== sourceTabId)],
+          activeTabId: newTab.id,
+          activePaneId: newTab.layout.id,
+        };
+      }
+
+      return {
+        tabs: state.tabs.map(t => 
+          t.id === sourceTabId 
+            ? { ...t, layout: newSourceLayout }
+            : t
+        ).concat([newTab]),
+        activeTabId: newTab.id,
+        activePaneId: newTab.layout.id,
+      };
+    });
+  },
+
+  movePaneToPane: (sourceTabId, sourcePaneId, targetTabId, targetPaneId, direction) => {
+    set((state) => {
+      const sourceTab = state.tabs.find(t => t.id === sourceTabId);
+      const targetTab = state.tabs.find(t => t.id === targetTabId);
+      
+      if (!sourceTab || !targetTab) return state;
+
+      const sourceResult = findPaneAndParent(sourceTab.layout, sourcePaneId);
+      if (!sourceResult || !('sessionId' in sourceResult.node)) return state;
+
+      const sourcePane = sourceResult.node as TerminalPane;
+      const targetResult = findPaneAndParent(targetTab.layout, targetPaneId);
+      if (!targetResult) return state;
+
+      const targetNode = targetResult.node;
+      
+      const orientation = (direction === 'left' || direction === 'right')
+        ? SplitOrientation.Vertical
+        : SplitOrientation.Horizontal;
+        
+      const isFirst = (direction === 'top' || direction === 'left');
+      
+      // If moving within the same tab, reuse the existing pane to preserve its identity
+      // If moving to a different tab, create a new pane with the same session
+      const movedPane: TerminalPane = sourceTabId === targetTabId 
+        ? sourcePane 
+        : { id: uuid(), sessionId: sourcePane.sessionId };
+      
+      const newSplit: SplitPane = {
+        id: uuid(),
+        orientation,
+        panes: isFirst ? [movedPane, targetNode] : [targetNode, movedPane],
+        sizes: [50, 50],
+      };
+
+      // First, remove the source pane from its current location
+      const newSourceLayout = sourceTabId === targetTabId 
+        ? removeNodeFromLayout(sourceTab.layout, sourcePaneId)
+        : removeNodeFromLayout(sourceTab.layout, sourcePaneId);
+
+      // Then, add it to the target location
+      // If source and target are the same tab, we need to work with the updated layout
+      const layoutToUpdate = sourceTabId === targetTabId ? newSourceLayout : targetTab.layout;
+      
+      if (!layoutToUpdate) {
+        // Source layout became empty, just create new tab with the split
+        return {
+          tabs: state.tabs.filter(t => t.id !== sourceTabId).map(t => 
+            t.id === targetTabId ? { ...t, layout: newSplit } : t
+          ),
+          activeTabId: targetTabId,
+          activePaneId: movedPane.id,
+        };
+      }
+
+      const newTargetLayout = replaceNodeInLayout(layoutToUpdate, targetPaneId, newSplit);
+
+      let newTabs: TerminalTab[];
+      
+      if (sourceTabId === targetTabId) {
+        // Moving within the same tab
+        newTabs = state.tabs.map(t => 
+          t.id === targetTabId ? { ...t, layout: newTargetLayout } : t
+        );
+      } else {
+        // Moving between different tabs
+        newTabs = state.tabs.map(t => {
+          if (t.id === targetTabId) {
+            return { ...t, layout: newTargetLayout };
+          }
+          if (t.id === sourceTabId) {
+            if (!newSourceLayout) {
+              return null;
+            }
+            return { ...t, layout: newSourceLayout };
+          }
+          return t;
+        }).filter((t): t is TerminalTab => t !== null);
+
+        // Remove source tab if it became empty
+        if (!newSourceLayout) {
+          newTabs = newTabs.filter(t => t.id !== sourceTabId);
+        }
+      }
+
+      return {
+        tabs: newTabs,
+        activeTabId: targetTabId,
+        activePaneId: movedPane.id,
+      };
+    });
   },
 
   // Terminal operations
@@ -802,6 +962,147 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     }
   },
 
+  // Workspace management
+  saveWorkspace: (name, description) => {
+    const state = get();
+    
+    console.log('[WORKSPACE] Saving workspace:', name);
+    console.log('[WORKSPACE] Current tabs:', state.tabs.length);
+    console.log('[WORKSPACE] Current sessions:', state.sessions.size);
+    console.log('[WORKSPACE] Tabs data:', state.tabs.map(t => ({ id: t.id, title: t.title })));
+    
+    const workspace = createWorkspace(
+      name,
+      description,
+      state.tabs,
+      state.activeTabId,
+      state.sessions
+    );
+
+    const newWorkspaces = [...state.workspaces, workspace];
+    set({ workspaces: newWorkspaces });
+    saveWorkspacesToStorage(newWorkspaces);
+
+    console.log('[WORKSPACE] Saved workspace:', workspace.name, 'Total workspaces:', newWorkspaces.length);
+    console.log('[WORKSPACE] Workspace tabs:', workspace.tabs.length);
+    return workspace;
+  },
+
+  loadWorkspace: async (workspaceId) => {
+    const state = get();
+    const workspace = state.workspaces.find(w => w.id === workspaceId);
+    
+    if (!workspace) {
+      throw new Error(`Workspace ${workspaceId} not found`);
+    }
+
+    console.log('[WORKSPACE] Loading workspace:', workspace.name, 'with', workspace.tabs.length, 'tabs');
+
+    // Close all existing tabs first
+    const currentTabs = [...state.tabs];
+    for (const tab of currentTabs) {
+      get().removeTab(tab.id);
+    }
+
+    // Recreate tabs from workspace
+    for (let i = 0; i < workspace.tabs.length; i++) {
+      const serializedTab = workspace.tabs[i];
+      const { tab, sessions: sessionConfigs } = deserializeTab(serializedTab);
+
+      // Create sessions and build session ID mapping
+      const sessionIdMap = new Map<number, string>();
+      for (let j = 0; j < sessionConfigs.length; j++) {
+        const config = sessionConfigs[j];
+        const newSessionId = await createSessionFromConfig(config, get());
+        sessionIdMap.set(j, newSessionId);
+      }
+
+      // Update layout with actual session IDs
+      const updateLayoutSessionIds = (
+        node: LayoutNode,
+        sessionIndex: number
+      ): { node: LayoutNode; nextIndex: number } => {
+        if ('sessionId' in node) {
+          const actualSessionId = sessionIdMap.get(sessionIndex);
+          if (!actualSessionId) {
+            throw new Error(`Session ID not found for index ${sessionIndex}`);
+          }
+          return {
+            node: { ...node, sessionId: actualSessionId },
+            nextIndex: sessionIndex + 1,
+          };
+        } else {
+          let currentIndex = sessionIndex;
+          const updatedPanes: LayoutNode[] = [];
+          
+          for (const pane of node.panes) {
+            const result = updateLayoutSessionIds(pane, currentIndex);
+            updatedPanes.push(result.node);
+            currentIndex = result.nextIndex;
+          }
+
+          return {
+            node: { ...node, panes: updatedPanes },
+            nextIndex: currentIndex,
+          };
+        }
+      };
+
+      const { node: updatedLayout } = updateLayoutSessionIds(tab.layout, 0);
+
+      // Add the tab
+      const newTab: TerminalTab = {
+        id: uuid(),
+        title: tab.title,
+        layout: updatedLayout,
+      };
+
+      get().addTab(newTab);
+    }
+
+    // Set active tab
+    const tabs = get().tabs;
+    if (workspace.activeTabIndex >= 0 && workspace.activeTabIndex < tabs.length) {
+      if (tabs[workspace.activeTabIndex]) {
+        get().setActiveTab(tabs[workspace.activeTabIndex].id);
+      }
+    }
+
+    console.log('[WORKSPACE] Successfully loaded workspace:', workspace.name);
+  },
+
+  deleteWorkspace: (workspaceId) => {
+    const state = get();
+    const workspace = state.workspaces.find(w => w.id === workspaceId);
+    const newWorkspaces = state.workspaces.filter(w => w.id !== workspaceId);
+    set({ workspaces: newWorkspaces });
+    saveWorkspacesToStorage(newWorkspaces);
+    
+    console.log('[WORKSPACE] Deleted workspace:', workspace?.name, 'Remaining:', newWorkspaces.length);
+  },
+
+  updateWorkspace: (workspaceId, name, description) => {
+    const state = get();
+    const newWorkspaces = state.workspaces.map(w => {
+      if (w.id === workspaceId) {
+        return updateWorkspaceTimestamp({
+          ...w,
+          name,
+          description,
+        });
+      }
+      return w;
+    });
+    set({ workspaces: newWorkspaces });
+    saveWorkspacesToStorage(newWorkspaces);
+    
+    console.log('[WORKSPACE] Updated workspace:', name);
+  },
+
+  getWorkspaces: () => {
+    return get().workspaces;
+  },
+
   reset: () => {
     // Cleanup all terminal instances before resetting state
     import('../components/terminal/Terminal').then(({ cleanupAllTerminalInstances }) => {
@@ -857,8 +1158,8 @@ if (typeof window !== "undefined") {
       }
       
       if (foundTabId && foundPaneId) {
-          // Use closePane to update layout
-          state.closePane(foundTabId, foundPaneId);
+          // Use closePane to update layout, skip backend call since terminal already closed
+          state.closePane(foundTabId, foundPaneId, true);
       } else {
           state.removeSession(event.SessionID);
           destroyTerminalInstance(event.SessionID);
@@ -891,3 +1192,25 @@ export const useActiveSession = () =>
     
     return sessionId ? state.sessions.get(sessionId) : null;
   });
+
+// Helper to create session from serialized config
+async function createSessionFromConfig(
+  config: SerializedSession,
+  store: ReturnType<typeof useTerminalStore.getState>
+): Promise<string> {
+  if (config.type === SessionType.SSH && config.sshConfig) {
+    return await store.createSSHTerminal(
+      config.sshConfig.host,
+      config.sshConfig.port,
+      config.sshConfig.username,
+      config.sshConfig.password,
+      config.sshConfig.privateKey,
+      config.title
+    );
+  } else {
+    return await store.createLocalTerminal(
+      config.shell,
+      config.workingDirectory
+    );
+  }
+}

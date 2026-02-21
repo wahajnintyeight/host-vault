@@ -18,6 +18,7 @@ interface TabProps {
   onCloseOthers?: () => void;
   onCloseRight?: () => void;
   onCloseAll?: () => void;
+  onSaveAsWorkspace?: () => void;
 }
 
 export const Tab: React.FC<TabProps> = ({
@@ -33,6 +34,7 @@ export const Tab: React.FC<TabProps> = ({
   onCloseOthers,
   onCloseRight,
   onCloseAll,
+  onSaveAsWorkspace,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedTitle, setEditedTitle] = useState(tab.title);
@@ -58,7 +60,7 @@ export const Tab: React.FC<TabProps> = ({
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.5 : 1,
+    opacity: isDragging ? 0 : 1, // Completely hide the original item while dragging, use overlay instead
   };
 
   useEffect(() => {
@@ -112,6 +114,9 @@ export const Tab: React.FC<TabProps> = ({
       case TabAction.Duplicate:
         onDuplicate();
         break;
+      case TabAction.SaveAsWorkspace:
+        onSaveAsWorkspace?.();
+        break;
       case TabAction.Close:
         onClose();
         break;
@@ -156,6 +161,7 @@ export const Tab: React.FC<TabProps> = ({
       <div
         ref={setNodeRef}
         {...attributes}
+        {...listeners}
         style={{
           ...style,
           touchAction: 'none',
@@ -177,7 +183,6 @@ export const Tab: React.FC<TabProps> = ({
         {/* Drag Handle - Visual affordance only */}
         <div
           className="flex-shrink-0 cursor-grab active:cursor-grabbing p-1 -ml-1 rounded hover:bg-background-lighter text-text-muted hover:text-text-primary transition-colors"
-          {...listeners}
         >
           <GripVertical className="w-3.5 h-3.5" />
         </div>

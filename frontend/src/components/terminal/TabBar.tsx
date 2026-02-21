@@ -13,13 +13,14 @@ interface TabBarProps {
   onTabActivate: (tabId: string) => void;
   onTabClose: (tabId: string) => void;
   onTabDuplicate: (tabId: string) => void;
-  onTabReorder: (fromIndex: number, toIndex: number) => void; // Kept for prop interface compatibility if needed, but logic moves up
+  onTabReorder: (fromIndex: number, toIndex: number) => void;
   onTabRename?: (tabId: string, newTitle: string) => void;
   onNewTab: () => void;
   onQuickConnect?: () => void;
   onCloseOthers?: (tabId: string) => void;
   onCloseRight?: (tabId: string) => void;
   onCloseAll?: () => void;
+  onSaveAsWorkspace?: (tabId: string) => void;
   getSessionType?: (tabId: string) => SessionType | undefined;
 }
 
@@ -38,6 +39,7 @@ export const TabBar: React.FC<TabBarProps> = ({
   onCloseOthers,
   onCloseRight,
   onCloseAll,
+  onSaveAsWorkspace,
   getSessionType,
 }) => {
   return (
@@ -67,6 +69,7 @@ export const TabBar: React.FC<TabBarProps> = ({
                   onCloseOthers={onCloseOthers ? () => onCloseOthers(tab.id) : undefined}
                   onCloseRight={onCloseRight ? () => onCloseRight(tab.id) : undefined}
                   onCloseAll={onCloseAll}
+                  onSaveAsWorkspace={onSaveAsWorkspace ? () => onSaveAsWorkspace(tab.id) : undefined}
                 />
               </div>
             ))}

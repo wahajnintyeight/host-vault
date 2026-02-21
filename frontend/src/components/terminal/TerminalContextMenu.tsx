@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Copy, X, XCircle, ChevronRight, Edit3, Trash2 } from 'lucide-react';
+import { Copy, X, XCircle, ChevronRight, Edit3, Trash2, Save } from 'lucide-react';
 import { TabAction } from '../../types/terminal';
 
 interface ContextMenuProps {
@@ -50,6 +50,11 @@ export const TerminalContextMenu: React.FC<ContextMenuProps> = ({
       action: TabAction.Duplicate,
       label: 'Duplicate',
       icon: <Copy className="w-4 h-4" />,
+    },
+    {
+      action: TabAction.SaveAsWorkspace,
+      label: 'Save as Workspace',
+      icon: <Save className="w-4 h-4" />,
       dividerAfter: true,
     },
     {

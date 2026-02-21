@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Terminal, 
   Cpu, 
@@ -8,18 +8,26 @@ import {
   Hash, 
   Activity,
   ChevronRight,
-  Monitor
+  Monitor,
+  Layers,
+  FolderOpen
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '../lib/constants';
 import { useConnectionStore } from '../store/connectionStore';
 import { useAuthStore } from '../store/authStore';
+import { useTerminalStore } from '../store/terminalStore';
 import { loadConnectionsFromFile } from '../lib/storage/connectionStorage';
+import { WorkspaceManager } from '../components/terminal/WorkspaceManager';
+import { getWorkspaceMetadata } from '../lib/workspaceSerializer';
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const { connections, setSelectedConnection, setConnections } = useConnectionStore();
   const { isGuestMode, user } = useAuthStore();
+  const { workspaces, loadWorkspace } = useTerminalStore();
+  const [showWorkspaceManager, setShowWorkspaceManager] = useState(false);
+  const [loadingWorkspace, setLoadingWorkspace] = useState<string | null>(null);
 
   useEffect(() => {
     // Load connections from file storage
@@ -47,6 +55,19 @@ export const DashboardPage: React.FC = () => {
 
   const favoriteConnections = connections.filter((conn) => conn.isFavorite).slice(0, 6);
   const recentConnections = connections.slice(0, 5);
+
+  const handleLoadWorkspace = async (workspaceId: string) => {
+    setLoadingWorkspace(workspaceId);
+    try {
+      await loadWorkspace(workspaceId);
+      navigate(ROUTES.TERMINAL);
+    } catch (error) {
+      console.error('Failed to load workspace:', error);
+      alert('Failed to load workspace');
+    } finally {
+      setLoadingWorkspace(null);
+    }
+  };
 
   const StatBox = ({ label, value, icon: Icon, colorClass }: { label: string, value: string | number, icon: any, colorClass: string }) => (
     <div className="bg-background-light border border-border p-4 font-mono group hover:border-primary/50 transition-all duration-300 rounded-lg shadow-sm">
@@ -85,7 +106,68 @@ export const DashboardPage: React.FC = () => {
           icon={Hash} 
           colorClass="text-warning" 
         />
+        <StatBox 
+          label="Workspaces" 
+          value={workspaces.length.toString().padStart(2, '0')} 
+          icon={Layers} 
+          colorClass="text-info" 
+        />
       </div>
+
+      {/* Workspaces Section */}
+      {workspaces.length > 0 && (
+        <div className="bg-background-light border border-border rounded-lg overflow-hidden shadow-sm">
+          <div className="bg-background-lighter/50 border-b border-border p-3 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm font-semibold text-text-primary">
+              <Layers size={16} className="text-info" />
+              <span>SAVED_WORKSPACES</span>
+            </div>
+            <button 
+              onClick={() => setShowWorkspaceManager(true)}
+              className="text-xs text-text-muted hover:text-primary transition-colors"
+            >
+              [MANAGE]
+            </button>
+          </div>
+          
+          <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {workspaces.slice(0, 6).map((workspace) => {
+              const metadata = getWorkspaceMetadata(workspace);
+              const isLoading = loadingWorkspace === workspace.id;
+              
+              return (
+                <div
+                  key={workspace.id}
+                  onClick={() => !isLoading && handleLoadWorkspace(workspace.id)}
+                  className={`group relative bg-background border border-border p-4 hover:border-primary/50 transition-all overflow-hidden rounded-lg hover:shadow-md ${isLoading ? 'opacity-50 cursor-wait' : 'cursor-pointer'}`}
+                >
+                  <div className="absolute top-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <ChevronRight size={16} className="text-primary" />
+                  </div>
+                  
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-8 h-8 bg-background-light flex items-center justify-center border border-border rounded-md group-hover:border-primary/30">
+                      <FolderOpen size={16} className="text-text-muted group-hover:text-primary transition-colors" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-text-primary group-hover:text-primary transition-colors truncate">{metadata.name}</p>
+                      <p className="text-xs text-text-muted">{metadata.tabCount} {metadata.tabCount === 1 ? 'tab' : 'tabs'}</p>
+                    </div>
+                  </div>
+                  
+                  {metadata.description && (
+                    <p className="text-xs text-text-muted mb-2 line-clamp-2">{metadata.description}</p>
+                  )}
+                  
+                  <div className="text-xs text-text-muted">
+                    {new Date(metadata.createdAt).toLocaleDateString()}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
@@ -193,6 +275,12 @@ export const DashboardPage: React.FC = () => {
         </div>
 
       </div>
+
+      {/* Workspace Manager Modal */}
+      <WorkspaceManager
+        isOpen={showWorkspaceManager}
+        onClose={() => setShowWorkspaceManager(false)}
+      />
     </div>
   );
 };

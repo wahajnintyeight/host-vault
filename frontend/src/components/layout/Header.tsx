@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Menu, Terminal } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useUserConfigStore } from '../../store/userConfigStore';
@@ -17,6 +17,9 @@ export const Header: React.FC = () => {
   const { updateConfig, config } = useUserConfigStore();
   const navigate = useNavigate();
   const location = useLocation();
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [saveWorkspaceName, setSaveWorkspaceName] = useState('');
+  const [saveWorkspaceDescription, setSaveWorkspaceDescription] = useState('');
 
   // Terminal store for tabs
   const {
@@ -29,6 +32,7 @@ export const Header: React.FC = () => {
     reorderTabs,
     duplicateTab,
     createLocalTerminal,
+    saveWorkspace,
   } = useTerminalStore();
 
   const isTerminalPage = location.pathname === ROUTES.TERMINAL;
@@ -90,6 +94,27 @@ export const Header: React.FC = () => {
 
   const handleCloseAll = () => tabs.forEach((t) => removeTab(t.id));
   
+  const handleSaveAsWorkspace = (tabId: string) => {
+    const tab = tabs.find(t => t.id === tabId);
+    if (tab) {
+      setSaveWorkspaceName(tab.title || 'My Workspace');
+      setSaveWorkspaceDescription('');
+      setShowSaveDialog(true);
+    }
+  };
+
+  const handleSaveWorkspace = () => {
+    if (!saveWorkspaceName.trim()) return;
+    
+    saveWorkspace(saveWorkspaceName.trim(), saveWorkspaceDescription.trim() || undefined);
+    setShowSaveDialog(false);
+    setSaveWorkspaceName('');
+    setSaveWorkspaceDescription('');
+    
+    // Show success message
+    alert('Workspace saved successfully!');
+  };
+  
   const getSessionType = (tabId: string) => {
     const tab = tabs.find(t => t.id === tabId);
     if (!tab) return undefined;
@@ -149,8 +174,8 @@ export const Header: React.FC = () => {
 
         {/* Terminal tabs - always visible */}
         <div 
-          className="flex-1 min-w-0 no-drag overflow-hidden h-full flex items-center gap-2"
-          style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}
+          className="flex-1 min-w-0 overflow-hidden h-full flex items-center gap-2"
+          style={{ '--wails-draggable': 'drag' } as React.CSSProperties}
         >
           {tabs.length > 0 && (
             <TabBar
@@ -165,6 +190,7 @@ export const Header: React.FC = () => {
               onCloseOthers={handleCloseOthers}
               onCloseRight={handleCloseRight}
               onCloseAll={handleCloseAll}
+              onSaveAsWorkspace={handleSaveAsWorkspace}
               getSessionType={getSessionType}
             />
           )}
@@ -190,6 +216,61 @@ export const Header: React.FC = () => {
         <UserMenu />
         <WindowControls />
       </div>
+
+      {/* Save Workspace Dialog */}
+      {showSaveDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-background border border-border rounded-lg shadow-2xl w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold text-text-primary mb-4">Save as Workspace</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-2">
+                  Workspace Name
+                </label>
+                <input
+                  type="text"
+                  value={saveWorkspaceName}
+                  onChange={(e) => setSaveWorkspaceName(e.target.value)}
+                  className="w-full px-3 py-2 bg-background-light border border-border rounded text-text-primary focus:outline-none focus:ring-2 focus:ring-primary"
+                  placeholder="Enter workspace name"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-2">
+                  Description (optional)
+                </label>
+                <textarea
+                  value={saveWorkspaceDescription}
+                  onChange={(e) => setSaveWorkspaceDescription(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 bg-background-light border border-border rounded text-text-primary focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                  placeholder="Enter description"
+                />
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => {
+                    setShowSaveDialog(false);
+                    setSaveWorkspaceName('');
+                    setSaveWorkspaceDescription('');
+                  }}
+                  className="px-4 py-2 rounded bg-background-light text-text-primary hover:bg-background-hover transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveWorkspace}
+                  disabled={!saveWorkspaceName.trim()}
+                  className="px-4 py-2 rounded bg-primary text-background hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 };

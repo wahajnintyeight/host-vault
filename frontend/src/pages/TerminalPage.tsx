@@ -81,8 +81,7 @@ export const TerminalPage: React.FC = () => {
   const activeSessionId = activeTab ? getActiveSessionId(activeTab) : null;
   const isConnecting = !!connectingSessionId;
 
-  const { dropTarget, activeDragTab } = useTerminalDnd();
-  const isDragging = activeDragTab !== null;
+  const { dropTarget, isDragging } = useTerminalDnd();
 
   // Get the active terminal handle for the drawer
   const activeTerminalRef = activeSessionId ? terminalRefs.current.get(activeSessionId) : null;
@@ -180,7 +179,7 @@ export const TerminalPage: React.FC = () => {
         {!isConnecting && (
           <button
             onClick={() => setIsDrawerOpen(!isDrawerOpen)}
-            className="absolute top-2 right-2 p-2 rounded bg-background-light/80 backdrop-blur
+            className="absolute top-8 right-2 p-2 rounded bg-background-light/80 backdrop-blur
               text-text-secondary hover:text-text-primary hover:bg-background-lighter
               transition-colors z-10"
             title={isDrawerOpen ? 'Close drawer (Ctrl+Shift+F)' : 'Open drawer (Ctrl+Shift+F)'}

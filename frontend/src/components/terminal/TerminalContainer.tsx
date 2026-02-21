@@ -121,9 +121,7 @@ const collisionDetection: CollisionDetection = (args) => {
     const paneCollision = pointer.find((c) =>
       String(c.id).startsWith('pane-')
     );
-    if (paneCollision) {
-      return [paneCollision];
-    }
+    if (paneCollision) return [paneCollision];
     return pointer;
   }
 
@@ -132,9 +130,7 @@ const collisionDetection: CollisionDetection = (args) => {
     const paneCollision = intersection.find((c) =>
       String(c.id).startsWith('pane-')
     );
-    if (paneCollision) {
-      return [paneCollision];
-    }
+    if (paneCollision) return [paneCollision];
     return intersection;
   }
 
@@ -157,7 +153,9 @@ export const TerminalContainer: React.FC = () => {
     tabId: string;
     direction: 'top' | 'bottom' | 'left' | 'right';
   } | null>(null);
+
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const initialPointerRef = useRef<{ x: number; y: number } | null>(null);
   const hoverActivateRef = useRef<{
     tabId: string | null;
     timeoutId: number | null;
@@ -193,9 +191,7 @@ export const TerminalContainer: React.FC = () => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!containerRef.current?.contains(document.activeElement)) {
-        return;
-      }
+      if (!containerRef.current?.contains(document.activeElement)) return;
 
       if (e.ctrlKey && e.key === 't') {
         e.preventDefault();
@@ -205,9 +201,7 @@ export const TerminalContainer: React.FC = () => {
 
       if (e.ctrlKey && e.key === 'w') {
         e.preventDefault();
-        if (activeTabId) {
-          removeTab(activeTabId);
-        }
+        if (activeTabId) removeTab(activeTabId);
         return;
       }
 
@@ -225,7 +219,8 @@ export const TerminalContainer: React.FC = () => {
         e.preventDefault();
         if (tabs.length > 0 && activeTabId) {
           const currentIndex = tabs.findIndex((t) => t.id === activeTabId);
-          const prevIndex = currentIndex === 0 ? tabs.length - 1 : currentIndex - 1;
+          const prevIndex =
+            currentIndex === 0 ? tabs.length - 1 : currentIndex - 1;
           setActiveTab(tabs[prevIndex].id);
         }
         return;
@@ -233,16 +228,12 @@ export const TerminalContainer: React.FC = () => {
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [tabs, activeTabId, createLocalTerminal, removeTab, setActiveTab]);
 
   const clearHoverActivate = useCallback(() => {
     const { timeoutId } = hoverActivateRef.current;
-    if (timeoutId !== null) {
-      window.clearTimeout(timeoutId);
-    }
+    if (timeoutId !== null) window.clearTimeout(timeoutId);
     hoverActivateRef.current = { tabId: null, timeoutId: null };
   }, []);
 
@@ -250,38 +241,25 @@ export const TerminalContainer: React.FC = () => {
     (event: DragStartEvent) => {
       const { active } = event;
       const tab = tabs.find((t) => t.id === active.id);
-      if (tab) {
-        console.log('[Terminal DnD] drag start', {
-          tabId: tab.id,
-          title: tab.title,
-        });
-        setActiveDragTab(tab);
-      }
-      lastPointerRef.current = getClientPoint(event.activatorEvent);
+      if (tab) setActiveDragTab(tab);
+      const point = getClientPoint(event.activatorEvent);
+      initialPointerRef.current = point;
+      lastPointerRef.current = point;
     },
     [tabs]
   );
 
   const handleDragMove = useCallback((event: DragMoveEvent) => {
-    const point = getClientPoint(event.activatorEvent);
-    if (point) {
-      lastPointerRef.current = point;
-      console.log('[Terminal DnD] drag move', {
-        x: point.x,
-        y: point.y,
-        activeId: event.active.id,
-      });
-    }
+    if (!initialPointerRef.current) return;
+    lastPointerRef.current = {
+      x: initialPointerRef.current.x + event.delta.x,
+      y: initialPointerRef.current.y + event.delta.y,
+    };
   }, []);
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const { active, over } = event;
-      console.log('[Terminal DnD] drag end', {
-        activeId: active.id,
-        overId: over?.id ?? null,
-        overType: over?.data.current?.type ?? null,
-      });
       setActiveDragTab(null);
       setDropTarget(null);
       clearHoverActivate();
@@ -295,17 +273,13 @@ export const TerminalContainer: React.FC = () => {
       if (activeData?.type === 'tab' && overData?.type === 'tab') {
         const oldIndex = activeData.index as number;
         const newIndex = overData.index as number;
-
-        if (oldIndex !== newIndex) {
-          reorderTabs(oldIndex, newIndex);
-        }
+        if (oldIndex !== newIndex) reorderTabs(oldIndex, newIndex);
         return;
       }
 
       if (overData?.type === 'pane' && activeData?.type === 'tab') {
         const targetPaneId = overData.paneId as string;
         const targetTabId = overData.tabId as string;
-
         if (sourceTabId === targetTabId) return;
 
         const point = lastPointerRef.current;
@@ -324,9 +298,6 @@ export const TerminalContainer: React.FC = () => {
       const { over, active } = event;
 
       if (!over) {
-        console.log('[Terminal DnD] drag over: no target', {
-          activeId: active.id,
-        });
         setDropTarget(null);
         clearHoverActivate();
         return;
@@ -337,10 +308,6 @@ export const TerminalContainer: React.FC = () => {
 
       if (activeData?.type === 'tab' && overData?.type === 'tab') {
         const overTabId = over.id as string;
-        console.log('[Terminal DnD] over tab', {
-          activeId: active.id,
-          overTabId,
-        });
         if (overTabId !== hoverActivateRef.current.tabId) {
           clearHoverActivate();
           hoverActivateRef.current.tabId = overTabId;
@@ -351,28 +318,17 @@ export const TerminalContainer: React.FC = () => {
         setDropTarget(null);
       } else if (overData?.type === 'pane' && activeData?.type === 'tab') {
         clearHoverActivate();
-        const point = lastPointerRef.current ?? getClientPoint(event.activatorEvent);
+        const point = lastPointerRef.current;
         const rect = over.rect as RectLike | null;
         if (!point || !rect) return;
 
         const direction = getDropDirection(point.x, point.y, rect);
-        console.log('[Terminal DnD] over pane', {
-          activeId: active.id,
-          paneId: overData.paneId,
-          tabId: overData.tabId,
-          direction,
-        });
         setDropTarget({
           paneId: overData.paneId as string,
           tabId: overData.tabId as string,
           direction,
         });
       } else {
-        console.log('[Terminal DnD] over unknown target', {
-          activeId: active.id,
-          overId: over.id,
-          overType: overData?.type ?? null,
-        });
         clearHoverActivate();
         setDropTarget(null);
       }
@@ -381,37 +337,27 @@ export const TerminalContainer: React.FC = () => {
   );
 
   const handleTabClose = useCallback(
-    (tabId: string) => {
-      removeTab(tabId);
-    },
+    (tabId: string) => removeTab(tabId),
     [removeTab]
   );
 
   const handleTabSelect = useCallback(
-    (tabId: string) => {
-      setActiveTab(tabId);
-    },
+    (tabId: string) => setActiveTab(tabId),
     [setActiveTab]
   );
 
   const handleTabRename = useCallback(
-    (tabId: string, newTitle: string) => {
-      updateTabTitle(tabId, newTitle);
-    },
+    (tabId: string, newTitle: string) => updateTabTitle(tabId, newTitle),
     [updateTabTitle]
   );
 
   const handleTabReorder = useCallback(
-    (fromIndex: number, toIndex: number) => {
-      reorderTabs(fromIndex, toIndex);
-    },
+    (fromIndex: number, toIndex: number) => reorderTabs(fromIndex, toIndex),
     [reorderTabs]
   );
 
   const handleTabDuplicate = useCallback(
-    (tabId: string) => {
-      duplicateTab(tabId).catch(console.error);
-    },
+    (tabId: string) => duplicateTab(tabId).catch(console.error),
     [duplicateTab]
   );
 
@@ -477,8 +423,7 @@ export const TerminalContainer: React.FC = () => {
 
   const handleCloseOthers = useCallback(
     (tabId: string) => {
-      const tabsToClose = tabs.filter((t) => t.id !== tabId);
-      tabsToClose.forEach((t) => removeTab(t.id));
+      tabs.filter((t) => t.id !== tabId).forEach((t) => removeTab(t.id));
     },
     [tabs, removeTab]
   );
@@ -487,9 +432,7 @@ export const TerminalContainer: React.FC = () => {
     (tabId: string) => {
       const tabIndex = tabs.findIndex((t) => t.id === tabId);
       if (tabIndex === -1) return;
-
-      const tabsToClose = tabs.slice(tabIndex + 1);
-      tabsToClose.forEach((t) => removeTab(t.id));
+      tabs.slice(tabIndex + 1).forEach((t) => removeTab(t.id));
     },
     [tabs, removeTab]
   );

@@ -83,15 +83,22 @@ const collisionDetection: CollisionDetection = (args) => {
 };
 
 export const TerminalDndProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { tabs, reorderTabs, mergeTabs, setActiveTab } = useTerminalStore();
+  const { tabs, reorderTabs, mergeTabs, setActiveTab, extractPaneToNewTab, movePaneToPane, sessions } = useTerminalStore();
   
   const [activeDragTab, setActiveDragTab] = useState<TerminalTab | null>(null);
+  const [activeDragPane, setActiveDragPane] = useState<{
+    paneId: string;
+    tabId: string;
+    sessionId: string;
+    title: string;
+  } | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     paneId: string;
     tabId: string;
     direction: 'top' | 'bottom' | 'left' | 'right';
   } | null>(null);
   
+  const initialPointerRef = useRef<{ x: number; y: number } | null>(null);
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
   const hoverActivateRef = useRef<{
     tabId: string | null;
@@ -116,31 +123,67 @@ export const TerminalDndProvider: React.FC<{ children: ReactNode }> = ({ childre
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const { active } = event;
-    const tab = tabs.find((t) => t.id === active.id);
-    if (tab) {
-      setActiveDragTab(tab);
-      // We also store it globally or dispatch it if children need to know
+    const activeData = active.data.current;
+    
+    if (activeData?.type === 'tab') {
+      const tab = tabs.find((t) => t.id === active.id);
+      if (tab) {
+        setActiveDragTab(tab);
+      }
+    } else if (activeData?.type === 'pane') {
+      setActiveDragPane({
+        paneId: activeData.paneId as string,
+        tabId: activeData.tabId as string,
+        sessionId: activeData.sessionId as string,
+        title: activeData.title as string,
+      });
     }
-    lastPointerRef.current = getClientPoint(event.activatorEvent);
+    
+    const point = getClientPoint(event.activatorEvent);
+    initialPointerRef.current = point;
+    lastPointerRef.current = point;
+    
+    // Add global mouse move listener to track actual cursor position
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
+    };
+    
+    document.addEventListener('mousemove', handleGlobalMouseMove);
+    
+    // Store cleanup function
+    const cleanup = () => {
+      document.removeEventListener('mousemove', handleGlobalMouseMove);
+    };
+    
+    // Store cleanup in a ref or state that can be accessed later
+    (window as any).__dndCleanup = cleanup;
   }, [tabs]);
 
   const handleDragMove = useCallback((event: DragMoveEvent) => {
-    const point = getClientPoint(event.activatorEvent);
-    if (point) lastPointerRef.current = point;
+    // Mouse position is now tracked by global listener in handleDragStart
+    // This is kept for compatibility but not used for position tracking
   }, []);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event;
+    
+    // Cleanup global mouse listener
+    if ((window as any).__dndCleanup) {
+      (window as any).__dndCleanup();
+      delete (window as any).__dndCleanup;
+    }
+    
     setActiveDragTab(null);
+    setActiveDragPane(null);
     setDropTarget(null);
     clearHoverActivate();
 
     if (!over) return;
 
-    const sourceTabId = active.id as string;
     const overData = over.data.current;
     const activeData = active.data.current;
 
+    // Tab dropping on tab (reorder)
     if (activeData?.type === 'tab' && overData?.type === 'tab') {
       const oldIndex = activeData.index as number;
       const newIndex = overData.index as number;
@@ -151,20 +194,52 @@ export const TerminalDndProvider: React.FC<{ children: ReactNode }> = ({ childre
       return;
     }
 
-    if (overData?.type === 'pane' && activeData?.type === 'tab') {
+    // Get current mouse position
+    const point = lastPointerRef.current;
+
+    // Tab dropping on pane (merge into split)
+    if (activeData?.type === 'tab' && overData?.type === 'pane') {
+      const sourceTabId = active.id as string;
       const targetPaneId = overData.paneId as string;
       const targetTabId = overData.tabId as string;
 
       if (sourceTabId === targetTabId) return;
 
-      const point = lastPointerRef.current;
       const rect = over.rect as RectLike | null;
       if (!point || !rect) return;
 
       const direction = getDropDirection(point.x, point.y, rect);
+      console.log('[DND] Tab->Pane drop direction:', direction, 'at point:', point, 'rect:', rect);
       mergeTabs(sourceTabId, targetTabId, targetPaneId, direction);
+      return;
     }
-  }, [clearHoverActivate, mergeTabs, reorderTabs]);
+
+    // Pane dropping on tab (extract to new tab)
+    if (activeData?.type === 'pane' && overData?.type === 'tab') {
+      const sourceTabId = activeData.tabId as string;
+      const sourcePaneId = activeData.paneId as string;
+      extractPaneToNewTab(sourceTabId, sourcePaneId);
+      return;
+    }
+
+    // Pane dropping on pane (move or split)
+    if (activeData?.type === 'pane' && overData?.type === 'pane') {
+      const sourceTabId = activeData.tabId as string;
+      const sourcePaneId = activeData.paneId as string;
+      const targetTabId = overData.tabId as string;
+      const targetPaneId = overData.paneId as string;
+
+      // Don't drop on self
+      if (sourceTabId === targetTabId && sourcePaneId === targetPaneId) return;
+
+      const rect = over.rect as RectLike | null;
+      if (!point || !rect) return;
+
+      const direction = getDropDirection(point.x, point.y, rect);
+      console.log('[DND] Pane->Pane drop direction:', direction, 'at point:', point, 'rect:', rect);
+      movePaneToPane(sourceTabId, sourcePaneId, targetTabId, targetPaneId, direction);
+    }
+  }, [clearHoverActivate, mergeTabs, reorderTabs, extractPaneToNewTab, movePaneToPane]);
 
   const handleDragOver = useCallback((event: DragOverEvent) => {
     const { over, active } = event;
@@ -178,6 +253,7 @@ export const TerminalDndProvider: React.FC<{ children: ReactNode }> = ({ childre
     const overData = over.data.current;
     const activeData = active.data.current;
 
+    // Tab over tab (hover activate)
     if (activeData?.type === 'tab' && overData?.type === 'tab') {
       const overTabId = over.id as string;
       if (overTabId !== hoverActivateRef.current.tabId) {
@@ -188,11 +264,26 @@ export const TerminalDndProvider: React.FC<{ children: ReactNode }> = ({ childre
         }, 350);
       }
       setDropTarget(null);
-    } else if (overData?.type === 'pane' && activeData?.type === 'tab') {
+    } 
+    // Pane over tab (show extract hint)
+    else if (activeData?.type === 'pane' && overData?.type === 'tab') {
       clearHoverActivate();
-      const point = lastPointerRef.current ?? getClientPoint(event.activatorEvent);
+      setDropTarget(null);
+    }
+    // Tab or Pane over pane (show drop zones)
+    else if (overData?.type === 'pane' && (activeData?.type === 'tab' || activeData?.type === 'pane')) {
+      clearHoverActivate();
+      const point = lastPointerRef.current;
       const rect = over.rect as RectLike | null;
       if (!point || !rect) return;
+
+      // Don't show drop indicator for pane dropping on itself
+      if (activeData?.type === 'pane' && 
+          activeData.paneId === overData.paneId && 
+          activeData.tabId === overData.tabId) {
+        setDropTarget(null);
+        return;
+      }
 
       const direction = getDropDirection(point.x, point.y, rect);
       setDropTarget({
@@ -206,6 +297,8 @@ export const TerminalDndProvider: React.FC<{ children: ReactNode }> = ({ childre
     }
   }, [clearHoverActivate, setActiveTab]);
 
+  const isDragging = activeDragTab !== null || activeDragPane !== null;
+
   return (
     <DndContext
       sensors={sensors}
@@ -216,8 +309,7 @@ export const TerminalDndProvider: React.FC<{ children: ReactNode }> = ({ childre
       onDragEnd={handleDragEnd}
       onDragOver={handleDragOver}
     >
-      {/* We pass down dropTarget and activeDragTab via a context or globally. Wait, let's just use Context. */}
-      <TerminalDndContext.Provider value={{ dropTarget, activeDragTab }}>
+      <TerminalDndContext.Provider value={{ dropTarget, activeDragTab, isDragging }}>
         {children}
       </TerminalDndContext.Provider>
 
@@ -226,6 +318,12 @@ export const TerminalDndProvider: React.FC<{ children: ReactNode }> = ({ childre
           <div className="flex items-center gap-2 px-4 py-2 bg-background-light border border-primary/50 rounded-lg shadow-2xl opacity-90 scale-105 pointer-events-none">
             <span className="text-text-primary font-medium pointer-events-none">
               {activeDragTab.title}
+            </span>
+          </div>
+        ) : activeDragPane ? (
+          <div className="flex items-center gap-2 px-4 py-2 bg-background-light border border-primary/50 rounded-lg shadow-2xl opacity-90 scale-105 pointer-events-none">
+            <span className="text-text-primary font-medium pointer-events-none">
+              {activeDragPane.title}
             </span>
           </div>
         ) : null}
@@ -241,9 +339,11 @@ export const TerminalDndContext = React.createContext<{
     direction: 'top' | 'bottom' | 'left' | 'right';
   } | null;
   activeDragTab: TerminalTab | null;
+  isDragging: boolean;
 }>({
   dropTarget: null,
   activeDragTab: null,
+  isDragging: false,
 });
 
 export const useTerminalDnd = () => React.useContext(TerminalDndContext);

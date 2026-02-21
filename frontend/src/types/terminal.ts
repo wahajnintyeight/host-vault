@@ -87,5 +87,6 @@ export enum TabAction {
   CloseOthers = 'close-others',
   CloseRight = 'close-right',
   CloseAll = 'close-all',
-  Rename = 'rename'
+  Rename = 'rename',
+  SaveAsWorkspace = 'save-as-workspace'
 }
