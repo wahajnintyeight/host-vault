@@ -13,6 +13,39 @@ A secure, modern SSH connection manager desktop application built with Wails (Go
 - **Master Password Protection**: AES-256-GCM encryption with PBKDF2 key derivation
 - **Recovery Codes**: Secure account recovery system
 
+#### **SSH Connection Management**
+- **Create/Edit/Delete Connections**: Full CRUD operations for SSH connections
+- **Connection Details**: Name, host, port, username, private key, password
+- **Quick Connect**: Fast connection dialog for one-time SSH sessions
+- **SSH Key Management**: Import SSH keys from file (OpenSSH format)
+- **Port Forwarding Configuration**: Local, remote, and dynamic port forwarding
+- **Connection Groups/Tags**: Organize connections with custom tags
+- **Favorites**: Mark connections as favorites for quick access
+- **Search & Filtering**: Search by name, host, username, or tags
+- **Host Key Verification**: SHA256/MD5 fingerprint display and verification
+- **Password Prompt**: Secure password entry modal
+- **Import from OpenSSH**: Parse OpenSSH config files
+- **Connection Cards**: Visual card-based connection display
+
+#### **Command/Snippet Management**
+- **Create/Edit/Delete Snippets**: Reusable command snippets
+- **Snippet Variables**: Define variables with default values
+- **Import/Export**: JSON import and export functionality
+- **Drag & Drop Reordering**: Organize snippets with drag and drop
+- **File-based Storage**: Stored in `%APPDATA%\host-vault\guest\commands.json` or user-specific path
+
+#### **Terminal Integration**
+- **SSH Terminal Sessions**: Full terminal emulation via Go backend
+- **Local Terminal Sessions**: Local shell sessions with custom shell selection
+- **Multiple Tabs**: Tab-based terminal interface
+- **Split Pane**: Split terminals horizontally or vertically
+- **Workspace Management**: Save and restore terminal layouts
+- **Terminal Themes**: Multiple terminal color schemes
+- **Clipboard History**: Track copied text in terminal sessions
+- **Drag & Drop Tabs**: Reorganize terminal tabs
+- **Reconnection Support**: Reconnect disconnected SSH sessions
+- **Host Key Management**: Store and verify known hosts
+
 #### **User Interface**
 - **15 Beautiful Themes**: 
   - Dark, Minimal, Cyberpunk, Rouge, Ocean, Forest, Sunset, Monochrome
@@ -25,7 +58,7 @@ A secure, modern SSH connection manager desktop application built with Wails (Go
 #### **Settings & Configuration**
 - **Organized Settings Page**: 
   - Appearance (Theme selection)
-  - General, Security, Notifications, Data, Account (prepared for future features)
+  - General, Security, Notifications, Data, Account
 - **File-based Configuration**: User preferences stored in app data directory
   - Guest: `%APPDATA%\host-vault\guest\config.json`
   - Users: `%APPDATA%\host-vault\users\{userId}\config.json`
@@ -39,37 +72,25 @@ A secure, modern SSH connection manager desktop application built with Wails (Go
 
 #### **Frontend Architecture**
 - **React Router**: Client-side routing with protected routes
-- **State Management**: Zustand stores for auth, connections, app state, user config
+- **State Management**: Zustand stores for auth, connections, app state, user config, snippets, terminal
 - **API Client**: Axios-based HTTP client with interceptors
 - **Type Safety**: Full TypeScript implementation
-- **Component Library**: Reusable UI components (Button, Card, Input, Modal, Toast, etc.)
+- **Component Library**: Reusable UI components (Button, Card, Input, Modal, Toast, ThemePicker, etc.)
 
 #### **Backend (Go)**
-- **File System Operations**: Read/Write/Exists methods for config files
+- **File System Operations**: Read/Write/Exists/Delete methods for config files
 - **Path Management**: App data directory, database, backup, and config paths
 - **Window Controls**: Minimize, maximize, close, and state checking
-- **Placeholder Methods**: Keychain, native dialogs (ready for implementation)
+- **Native Dialogs**: File open and save dialogs with custom filters
+- **Terminal Manager**: Full SSH and local terminal session management
+- **Host Key Operations**: Get/accept/verify SSH host keys
 
 ### 🚧 Remaining Features / TODO
 
 #### **High Priority**
-- [ ] **SSH Connection Management**
-  - [ ] Create, edit, delete SSH connections
-  - [ ] Connection testing and validation
-  - [ ] SSH key management
-  - [ ] Port forwarding configuration
-  - [ ] Connection groups/tags
-  - [ ] Import from OpenSSH, PuTTY, Termius
-
-- [ ] **Command Management**
-  - [ ] Create, edit, delete reusable commands
-  - [ ] Command variables/templates
-  - [ ] Command execution history
-  - [ ] Quick command execution
-
 - [ ] **SQLite Database Integration**
-  - [ ] Database schema implementation
-  - [ ] CRUD operations for connections and commands
+  - [ ] Full database schema implementation in Go backend
+  - [ ] CRUD operations for connections and commands via Wails bindings
   - [ ] Version history tracking
   - [ ] Soft delete and recovery
 
@@ -78,18 +99,13 @@ A secure, modern SSH connection manager desktop application built with Wails (Go
   - [ ] Retrieve credentials securely
   - [ ] Delete credentials
 
-- [ ] **Native Dialogs**
-  - [ ] Message dialogs (info, warning, error, confirm)
-  - [ ] File open/save dialogs
-  - [ ] Folder selection dialogs
-
-#### **Medium Priority**
 - [ ] **Cloud Sync**
   - [ ] Push/pull synchronization
   - [ ] Conflict resolution
   - [ ] Sync status indicators
   - [ ] Offline mode support
 
+#### **Medium Priority**
 - [ ] **Security Features**
   - [ ] Two-factor authentication (2FA)
   - [ ] Session management
@@ -119,7 +135,6 @@ A secure, modern SSH connection manager desktop application built with Wails (Go
   - [ ] Plugin system
 
 - [ ] **UI/UX Enhancements**
-  - [ ] Connection terminal integration
   - [ ] File transfer (SFTP)
   - [ ] Connection statistics
   - [ ] Usage analytics
