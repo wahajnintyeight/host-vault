@@ -6,6 +6,13 @@
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
+  "info": {
+    "productVersion": "1.0.0",
+    "companyName": "Wahaj",
+    "productName": "Host Vault",
+    "copyright": "Copyright © 2026 Wahaj",
+    "comments": "A secure, modern SSH connection manager"
+  },
   "author": {
     "name": "Wahaj",
     "email": "wahajdorift@yahoo.com"
