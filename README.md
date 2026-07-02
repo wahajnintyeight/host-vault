@@ -2,6 +2,12 @@
 
 A secure, modern SSH connection manager desktop application built with Wails (Go + React + TypeScript). Host Vault provides a beautiful, intuitive interface for managing SSH connections, commands, and credentials with enterprise-grade security features.
 
+## Screenshots
+
+![Host Vault terminal workspace](assets/screenshots/1_hostvault.png)
+
+![Host Vault dashboard](assets/screenshots/2_hostvault.png)
+
 ## 🎯 Features
 
 ### ✅ Implemented Features
